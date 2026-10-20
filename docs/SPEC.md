@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.3 |
+| **Status** | Draft v0.5 |
 | **Owner** | Vijay |
-| **Last updated** | 2026-10-17 |
+| **Last updated** | 2026-10-19 |
 | **Target platform** | Google Cloud (Cloud Run) |
 
 ---
@@ -61,9 +61,10 @@ Document intelligence is one of the most common workflows inside any company. Th
 | `CUAD_v1.json` (SQuAD format) | Gold **spans**: exact clause text per category, with character offsets into the txt. |
 | `master_clauses.csv` | One row per contract. Gold span text per category plus `<Category>-Answer` columns with **normalized answers** (Yes/No, dates, durations, jurisdictions, party names). |
 
-> **Phase 1 tasks:**
-> 1. Load both gold sources into DuckDB and reconcile them. Record any discrepancies in `docs/notes/cuad-quirks.md`. Expect some, because annotation noise is a known property of CUAD and it explains part of your error rate.
-> 2. Measure **text-layer coverage** of the PDFs (characters per page from `pypdf`). Most CUAD PDFs are probably born-digital. If so, an OCR comparison on them alone proves little, which is why §6.3 adds a synthetic-scan variant.
+> **Phase 1 findings** (details in [`docs/notes/cuad-quirks.md`](notes/cuad-quirks.md) and [`cuad-dataset-profile.md`](notes/cuad-dataset-profile.md)):
+> 1. The two gold sources agree on clause presence in 16,828 of 16,830 labels. For typed fields, 160 labels mark the relevant text but have no derivable value (e.g. an expiration clause with no fixed date). Typed answers include partial dates, multiple values and "perpetual".
+> 2. **All 510 PDFs are born-digital**: none is image-only. An OCR comparison on them alone proves little, which is why §6.3's synthetic-scan variant is required, not optional.
+> 3. Expiration and effective dates are often *computed* by the annotator ("five years from the date hereof"), so extracting them is a reasoning task.
 
 ### 2.2 The 41 categories, grouped by field type
 
@@ -71,14 +72,14 @@ The field type determines the output schema shape, how the eval matches predicti
 
 | Field type | CUAD categories | Output shape |
 |---|---|---|
-| **`entity_list`** | Parties | list of `{name, role}` |
+| **`entity_list`** | Parties | list of `{name, aliases}`, where aliases are the defined terms ("Distributor") |
 | **`text`** | Document Name | string |
-| **`date`** | Agreement Date, Effective Date, Expiration Date | ISO-8601 date, or `null` + `raw_text` for conditional or perpetual cases |
-| **`duration`** | Renewal Term, Notice Period To Terminate Renewal, Warranty Duration | normalized `{value, unit}` + raw text |
-| **`jurisdiction`** | Governing Law | canonical state/country |
-| **`clause`** (presence + evidence) | Most Favored Nation, Non-Compete, Exclusivity, No-Solicit Of Customers, Competitive Restriction Exception, No-Solicit Of Employees, Non-Disparagement, Termination For Convenience, ROFR/ROFO/ROFN, Change Of Control, Anti-Assignment, Revenue/Profit Sharing, Price Restrictions, Minimum Commitment, Volume Restriction, IP Ownership Assignment, Joint IP Ownership, License Grant, Non-Transferable License, Affiliate License-Licensor, Affiliate License-Licensee, Unlimited/All-You-Can-Eat License, Irrevocable Or Perpetual License, Source Code Escrow, Post-Termination Services, Audit Rights, Uncapped Liability, Cap On Liability, Liquidated Damages, Insurance, Covenant Not To Sue, Third Party Beneficiary | `{present: bool, evidence: [Evidence]}` |
+| **`date`** | Agreement Date, Effective Date, Expiration Date | list of partial dates (any of year/month/day may be unknown) + `perpetual` flag + raw text |
+| **`duration`** | Renewal Term, Notice Period To Terminate Renewal | list of `{value, unit, successive, count}` + `perpetual` flag + raw text |
+| **`jurisdiction`** | Governing Law | list of canonical jurisdictions + raw text |
+| **`clause`** (presence + evidence) | Most Favored Nation, Non-Compete, Exclusivity, No-Solicit Of Customers, Competitive Restriction Exception, No-Solicit Of Employees, Non-Disparagement, Termination For Convenience, ROFR/ROFO/ROFN, Change Of Control, Anti-Assignment, Revenue/Profit Sharing, Price Restrictions, Minimum Commitment, Volume Restriction, IP Ownership Assignment, Joint IP Ownership, License Grant, Non-Transferable License, Affiliate License-Licensor, Affiliate License-Licensee, Unlimited/All-You-Can-Eat License, Irrevocable Or Perpetual License, Source Code Escrow, Post-Termination Services, Audit Rights, Uncapped Liability, Cap On Liability, Liquidated Damages, **Warranty Duration**, Insurance, Covenant Not To Sue, Third Party Beneficiary | `{present: bool, evidence: [Evidence]}` |
 
-That is 1 + 1 + 3 + 3 + 1 + 32 = 41. Verify the exact names against the `master_clauses.csv` headers in Phase 1.
+That is 1 + 1 + 3 + 2 + 1 + 33 = 41, matching the CUAD README's "33 Yes/No categories". **Warranty Duration is a clause:** the README gives it a duration answer format, but the gold CSV only records Yes/No. Typed fields are lists because CUAD answers can have several values (`60 days; 180 days`). Exact category spellings live in the field registry (`dip.schema.registry`).
 
 Clause fields also get a secondary **clause family** tag (restrictive covenants, IP & licensing, termination & term, commercial terms, liability & risk) so the report can break results down at a second level. Typed fields and clause fields behave very differently, and so do clause families.
 
@@ -89,12 +90,12 @@ You start with a **small labeled subset** and grow it only when you need more st
 | Set | Size | Purpose | Rules |
 |---|---|---|---|
 | **smoke** | 5 docs | CI regression gate | Fixed. Parse outputs are cached and committed. |
-| **experiment** | ~30 docs, stratified by contract type | Parser, model and prompt bake-offs (§3), where each run costs money | Drawn from dev. Fixed across all experiments so results are comparable. |
-| **dev** | ~80 docs | Prompt iteration, error analysis | You may read individual errors. |
-| **train** | rest of non-test | Source of few-shot examples and phrasing variants (§7.2) | Never evaluated on. |
-| **test** | ~100 docs (or CUAD's published split) | Milestone scoring only | **Frozen.** Never read individual errors here while tuning. |
+| **experiment** | 30 docs | Parser, model and prompt bake-offs (§3), where each run costs money | Drawn from dev. Fixed across all experiments so results are comparable. |
+| **dev** | 80 docs | Prompt iteration, error analysis | You may read individual errors. |
+| **train** | 328 docs (rest of non-test) | Source of few-shot examples and phrasing variants (§7.2) | Never evaluated on. |
+| **test** | 102 docs (20%) | Milestone scoring only | **Frozen.** Never read individual errors here while tuning. |
 
-Commit `data/splits.json` (seeded and stratified by contract type) so every run is reproducible.
+Splits use seeded **multi-label iterative stratification** over contract type *and* the presence of all 41 fields ([ADR I9](adr/I9-splits.md)). Stratifying on contract type alone left three rare clauses with zero examples in the experiment set. `data/splits.json` is committed, regenerates byte-identically from its seed, and `dip make-splits` refuses to overwrite it without `--force`. Even so, 9 clauses have fewer than 10 positives in test, so report them with CIs and rely on type and family rollups.
 
 ### 2.4 Label quality
 
@@ -179,51 +180,58 @@ class FieldSpec:
     multi_valued: bool = False
 ```
 
-### 4.3 Domain schema (sketch)
+### 4.3 Domain schema
+
+Implemented in `src/dip/schema/domain.py` (Phase 1). Its shapes follow what CUAD actually contains: partial dates, multiple values per field, and parties with defined-term aliases. Gold labels (`GoldRecord`) and predictions share `ContractFields`, so the eval compares like with like.
 
 ```python
 class Evidence(BaseModel):
     quote: str                       # verbatim text from the document
-    page: int | None = None
     char_start: int | None = None    # filled by grounding, never by the LLM
     char_end: int | None = None
-    grounded: bool
-    match_score: float               # 0..1
+    page: int | None = None
+    grounded: bool | None = None     # None until grounding has run; gold spans are True
+    match_score: float | None = None # 0..1
 
-class ClauseField(BaseModel):
-    present: bool
-    evidence: list[Evidence] = []
+class PartialDate(BaseModel):        # "[]/[]/2020" -> year only
+    year: int | None; month: int | None; day: int | None
 
 class DateField(BaseModel):
-    value: date | None
-    raw_text: str | None
+    values: list[PartialDate] = []   # "07/31/2000; 07/[]/2000" -> two values
+    perpetual: bool = False
+    raw_text: str | None = None
     evidence: list[Evidence] = []
 
+class Duration(BaseModel):
+    value: float; unit: Literal["days", "weeks", "months", "years"]
+    successive: bool = False         # "successive 1 year" renewals
+    count: int | None = None         # "four successive 10 years" -> 4
+
 class DurationField(BaseModel):
-    value: float | None
-    unit: Literal["days", "months", "years"] | None
-    raw_text: str | None
-    evidence: list[Evidence] = []
+    values: list[Duration] = []; perpetual: bool = False
+    raw_text: str | None = None; evidence: list[Evidence] = []
 
 class Party(BaseModel):
     name: str
-    role: str | None                 # the defined term, e.g. "Distributor"
+    aliases: list[str] = []          # defined terms, e.g. ["Distributor"]
 
-class ContractRecord(BaseModel):
+class ClauseField(BaseModel):
+    present: bool = False
+    evidence: list[Evidence] = []
+
+class ContractFields(BaseModel):     # shared by gold and predictions
+    document_name: TextField; parties: PartyListField
+    agreement_date: DateField; effective_date: DateField; expiration_date: DateField
+    renewal_term: DurationField; notice_period_to_terminate_renewal: DurationField
+    governing_law: JurisdictionField
+    clauses: ClauseSet               # 33 ClauseFields; a unit test checks them against the registry
+
+class ContractRecord(BaseModel):     # Phase 3+: what the API returns
     record_id: UUID
     document_sha256: str
     schema_version: str              # semver; bump on breaking change
     provenance: Provenance           # route/parser+version, model, prompt_version, git sha, timings, tokens, cost_usd
-    document_name: TextField
-    parties: PartyListField
-    agreement_date: DateField
-    effective_date: DateField
-    expiration_date: DateField
-    renewal_term: DurationField
-    notice_period_to_terminate_renewal: DurationField
-    warranty_duration: DurationField
-    governing_law: JurisdictionField
-    clauses: ClauseSet               # 32 ClauseFields, generated from the registry
+    fields: ContractFields
     validation_issues: list[ValidationIssue]
 ```
 
@@ -459,13 +467,15 @@ gs://{project}-dip-{env}/
 |---|---|---|
 | `clause` (presence) | pred `present` vs gold has ≥1 span | TP both present. FP pred only. FN gold only. TN neither. |
 | `clause` (span, strict) | each gold span matched to a predicted quote by **token Jaccard ≥ 0.5** (CUAD convention), greedy bipartite matching | unmatched preds are FP, unmatched gold are FN |
-| `date` | ISO equality | correct = TP. **Wrong value = FP + FN.** Missed = FN. Spurious = FP. |
+| `date` | equality on the components gold knows (a year-only gold date matches any prediction in that year; to be confirmed in Phase 2). Any gold value in a multi-valued answer counts. | correct = TP. **Wrong value = FP + FN.** Missed = FN. Spurious = FP. |
 | `duration` | equal after converting to days (documented convention: month = 30, year = 365) | as date |
 | `jurisdiction` | canonical equality | as date |
 | `entity_list` | fuzzy ratio ≥ 90 on normalized names | set matching |
 | `text` | fuzzy ratio ≥ 85 | as date |
 
 Write a unit test for the "wrong value = FP + FN" case.
+
+**Typed fields are scored twice** (a Phase 1 finding). *Presence* asks whether the model found the relevant text. *Value* asks whether the normalized value is right. CUAD has 160 typed labels where the text is marked but no value can be derived, such as an expiration clause tied to an event rather than a date. These count for presence and are excluded from value scoring. So are the 26 gold answers marked `unparsed_answer`.
 
 ### 10.4 Metrics reported
 
@@ -777,7 +787,8 @@ document_intelligence_pipeline/
 ├── src/dip/
 │   ├── config.py
 │   ├── schema/      registry.py  llm.py  domain.py
-│   ├── ingest/      cuad.py  build_gold.py  splits.py  synth_scans.py
+│   ├── ingest/      cuad.py  build_gold.py  splits.py  text_layer.py  synth_scans.py
+│   ├── analytics/   cuad_report.py   # renders analytics/queries/*.sql to Markdown
 │   ├── parse/       base.py  pypdf_parser.py  docling_parser.py  llamaparse_parser.py  text_parser.py  cache.py
 │   ├── extract/     routes.py  extractor.py  grouping.py  context.py (defined terms, glossary)  retrieval.py  prompts/v{N}/
 │   ├── validate/    normalize.py  grounding.py  rules.py  reask.py
@@ -846,8 +857,9 @@ document_intelligence_pipeline/
 3. Is a hybrid router (text-layer coverage → route) worth its complexity? It depends on the D1 results.
 4. Firestore vs GCS status objects (I4) at your scale?
 5. Keep DOCX in v1?
-6. MCP: do your target clients support MCP's long-running task features yet, or is polling enough? And do they all accept a pre-registered OAuth client ID, or will you need the OAuth proxy fallback (ADR I8)? (The authorization server is decided: Google OAuth.)
-7. Will more than one organization ever connect via MCP? If so, add `owner_id` scoping before exposing `search_records`.
+6. Partial gold dates: should a year-only gold date (`[]/[]/2020`) match a full predicted date in that year, or be excluded from value scoring? Decide in Phase 2 and record it.
+7. MCP: do your target clients support MCP's long-running task features yet, or is polling enough? And do they all accept a pre-registered OAuth client ID, or will you need the OAuth proxy fallback (ADR I8)? (The authorization server is decided: Google OAuth.)
+8. Will more than one organization ever connect via MCP? If so, add `owner_id` scoping before exposing `search_records`.
 
 ---
 
@@ -864,6 +876,14 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.5 (2026-10-19), Phase 1 findings:**
+  - Warranty Duration reclassified as a clause (33 clauses + 8 typed fields).
+  - Typed fields are lists, with partial dates, `perpetual` flags and party aliases (§2.2, §4.3).
+  - Splits use multi-label iterative stratification with actual sizes (§2.3, ADR I9).
+  - CUAD confirmed born-digital (§2.1).
+  - Typed fields are scored for presence and for value (§10.3).
+  - Added open question 6 on partial dates.
 
 - **v0.4 (2026-10-17):**
   - Chose Google OAuth as the MCP authorization server (ADR I8).
