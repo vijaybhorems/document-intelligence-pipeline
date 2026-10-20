@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.7 |
+| **Status** | Draft v0.8 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-20 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -126,8 +126,8 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 | D3 | **How much context to send** | full document · retrieved sections only · retrieved sections + definitions | §7.4 | recall per type (especially rare clauses), input tokens/doc | 5 |
 | D4 | **Field grouping** | 1 call for all 41 fields · ~5 grouped calls · 1 call per field | Experiment set | F1, cost, latency | 3 · **decided: single call** ([ADR](adr/D4-field-grouping.md)) |
 | D5 | **Prompt strategy** | zero-shot definitions · + phrasing variants · + few-shot from train · + defined-terms injection | §7.2–7.3, ablation one step at a time | F1 overall + **non-canonical phrasing recall** (§10.6) | 5 |
-| D6 | **Where validation goes** | strict schema only · schema + post-hoc validators · post-hoc + re-ask with validation errors | §8.4 | valid-output rate, hallucination rate, precision, extra cost | 4 |
-| D7 | **Grounding policy** | keep ungrounded values with a warning · drop them | §8.3 | precision vs recall trade-off per type | 4 |
+| D6 | **Where validation goes** | strict schema only · schema + post-hoc validators · post-hoc + re-ask with validation errors | §8.4 | valid-output rate, hallucination rate, precision, extra cost | 4 · **decided: post-hoc + re-ask** ([ADR](adr/D6-validation-placement.md)) |
+| D7 | **Grounding policy** | keep ungrounded values with a warning · drop them | §8.3 | precision vs recall trade-off per type | 4 · **decided: warn** ([ADR](adr/D7-grounding-policy.md)) |
 | D8 | **MCP tool design** | few coarse tools · many fine-grained tools; terse vs detailed tool descriptions | §12.2.6 agent task eval | answer accuracy, citation accuracy, tool calls per task, tokens per task | 9.5 |
 
 ### 3.2 Experiment protocol
@@ -396,7 +396,7 @@ Validation answers three questions. Did the **right fields** come back? Are they
 | L1: Structural | missing or extra fields, wrong types | OpenAI strict Structured Outputs + Pydantic parse of the LLM schema |
 | L2: Semantic | unparseable dates, impossible durations, unknown jurisdictions | normalizers (§8.2). Each failure becomes a `ValidationIssue`. |
 | L3: Grounding | **hallucinated values**: quotes that aren't in the document | fuzzy quote search (§8.3) |
-| L4: Consistency | values that contradict each other | rules: expiration ≥ effective, `present=true` ⇒ ≥1 evidence, and so on |
+| L4: Consistency | values that contradict each other | rules in `dip.validate.rules`: dates out of order, implausible durations, dependent clauses without their parent (an exception with no restriction, a license property with no grant). Every rule is measured against **train-split gold** first; a rule that fires on gold is a false alarm. |
 
 ### 8.2 Normalization
 
@@ -407,7 +407,7 @@ Validation answers three questions. Did the **right fields** come back? Are they
 
 ### 8.3 Grounding
 
-Search for the quote in the source text with whitespace normalization and `rapidfuzz` partial ratio, then set `grounded`, `match_score`, offsets and page. `GROUNDING_POLICY=warn|drop` (D7).
+Locate each quote in the source text, in order: exact match; match after normalizing whitespace, case, curly quotes and dashes; `rapidfuzz` partial-ratio alignment (score ≥ 90); and **spliced** matching. Spliced means every word appears in order as a few long pieces separated by small source gaps, which covers quotes that skip an EDGAR page footer mid-sentence or use "...". Set `grounded`, `match_score` and offsets, and snap a grounded quote to the exact source text. Policy (D7): `warn` (keep the value, flag it) or `drop`. Implemented in `dip.validate.grounding` and `dip.validate.validator`.
 
 ### 8.4 Where validation goes (D6)
 
@@ -418,6 +418,13 @@ Search for the quote in the source text with whitespace normalization and `rapid
 | C | B + **re-ask**: send validation errors back to the model once and ask for a correction | Higher cost and latency. May recover recall lost by dropping. |
 
 Measure all three on the experiment set: valid-output rate, **hallucination rate** (§10.4), precision, recall, and cost/doc. Pick one and write the ADR.
+
+**Phase 4 result (dev, gpt-5.6-luna):**
+- 99.9% of quotes are grounded, and **0 of 274 false positives are hallucinated**: every error quotes real text and misreads it.
+- Option C (re-ask on errors) gives 100% valid outputs, 0 unsupported values and +0.18 F1, at +12% cost; D7 is `warn`.
+- Validation can't see over-triggers, so precision work moves to Phase 5.
+
+`dip validate <run>` applies validation to saved predictions without re-extracting.
 
 ---
 
@@ -489,7 +496,7 @@ Unit tests cover the "wrong value = FP + FN" case. An **oracle test** scores gol
 - **Per field:** P, R, F1, support. TN as well for clauses.
 - **Per field type and per clause family:** micro (pooled counts) and macro (mean of per-field F1). Micro is dominated by common fields and macro exposes rare ones.
 - **Bootstrap 95% CIs** (resample documents, 1,000 iterations). Many rare clauses have support under 10, so the CIs stop you over-reading noise.
-- **Hallucination rate:** of the predicted values whose gold is absent, the share that is also ungrounded. Also report the overall grounding rate.
+- **Hallucination rate:** of the predicted values whose gold is absent, the share that is also ungrounded. The rest are **over-triggers**: real text, wrong reading. Also report the overall grounding rate and unsupported values. All implemented in `dip.eval.validation_metrics` and shown in every report.
 - **Valid-output rate:** share of documents whose output passes L1–L2 with no errors.
 - **Cost/doc, p50/p95 latency, tokens** (input / cached / output / image).
 - Stretch: precision at 80% and 90% recall (CUAD's headline metric), if you have a usable confidence signal.
@@ -805,7 +812,7 @@ document_intelligence_pipeline/
 │   ├── analytics/   cuad_report.py   # renders analytics/queries/*.sql to Markdown
 │   ├── parse/       base.py  pypdf_parser.py  docling_parser.py  llamaparse_parser.py  text_parser.py  cache.py
 │   ├── extract/     routes.py  extractor.py  grouping.py  context.py (defined terms, glossary)  retrieval.py  prompts/v{N}/
-│   ├── validate/    normalize.py  grounding.py  rules.py  reask.py
+│   ├── validate/    normalize.py  grounding.py  rules.py  validator.py
 │   ├── pipeline.py
 │   ├── store/       gcs.py  jobs.py  lake.py
 │   ├── services/    jobs.py  records.py  analytics.py   # shared by api/ and mcp_server/
@@ -891,6 +898,12 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.8 (2026-10-20), Phase 4:**
+  - D6 decided: post-hoc validation + re-ask. D7 decided: warn.
+  - Grounding with splice handling.
+  - Rules measured against gold (cap + uncapped rejected).
+  - Hallucination vs over-trigger metrics.
 
 - **v0.7 (2026-10-20), Phase 3:**
   - D4 decided: single call per contract, with prompt-caching findings (§3.1, §7.1, ADR D4).
