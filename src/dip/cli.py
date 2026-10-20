@@ -228,12 +228,13 @@ def estimate(
 @app.command()
 def spend() -> None:
     """Total recorded spend across all runs, against DIP_BUDGET_USD."""
-    from dip.eval.runs import load_meta, spent_usd
+    from dip.eval.runs import run_spend_usd, spent_usd
 
     runs = _paths()["runs"]
     for run_dir in sorted(runs.glob("*")):
-        if (run_dir / "run.json").exists() and (cost := load_meta(run_dir).usage.cost_usd):
-            typer.echo(f"  ${cost:7.4f}  {run_dir.name}")
+        if run_dir.is_dir() and (cost := run_spend_usd(run_dir)):
+            note = "" if (run_dir / "run.json").exists() else "  (incomplete: no run.json)"
+            typer.echo(f"  ${cost:7.4f}  {run_dir.name}{note}")
     typer.echo(f"spent ${spent_usd(runs):.4f} of ${get_settings().budget_usd:.2f}")
 
 

@@ -14,6 +14,7 @@ the rest run concurrently and can read it back at a discount.
 import asyncio
 import hashlib
 import time
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, cast
 
@@ -52,11 +53,21 @@ def call_plan(strategy: Strategy) -> list[tuple[str, list[FieldSpec]]]:
 
 
 class _Budget:
-    """Shared spend counter: stop starting new contracts once the cap is reached."""
+    """Shared spend counter: stop starting new contracts once the cap is reached.
 
-    def __init__(self, cap_usd: float | None) -> None:
+    Every paid call is also reported to ``on_usage`` as it happens, so a run that
+    crashes halfway still has its spend on record.
+    """
+
+    def __init__(self, cap_usd: float | None, on_usage: Callable[[Usage], None] | None) -> None:
         self.cap = cap_usd
         self.spent = 0.0
+        self.on_usage = on_usage
+
+    def record(self, usage: Usage) -> None:
+        self.spent += usage.cost_usd
+        if self.on_usage:
+            self.on_usage(usage)
 
     @property
     def exhausted(self) -> bool:
@@ -112,12 +123,18 @@ class OpenAIExtractor:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def predict_all(
-        self, texts: dict[str, str], max_cost_usd: float | None = None
+        self,
+        texts: dict[str, str],
+        max_cost_usd: float | None = None,
+        on_usage: Callable[[Usage], None] | None = None,
     ) -> dict[str, SystemOutput]:
-        return asyncio.run(self._predict_all(texts, max_cost_usd))
+        return asyncio.run(self._predict_all(texts, max_cost_usd, on_usage))
 
     async def _predict_all(
-        self, texts: dict[str, str], max_cost_usd: float | None
+        self,
+        texts: dict[str, str],
+        max_cost_usd: float | None,
+        on_usage: Callable[[Usage], None] | None,
     ) -> dict[str, SystemOutput]:
         client = self._client or AsyncOpenAI(
             api_key=self._api_key, timeout=self.timeout_s, max_retries=4
@@ -125,7 +142,7 @@ class OpenAIExtractor:
         calls = asyncio.Semaphore(self.max_concurrency)
         # Bound how many contracts are in flight, so the budget check stays meaningful.
         contracts = asyncio.Semaphore(max(1, self.max_concurrency // 2))
-        budget = _Budget(max_cost_usd)
+        budget = _Budget(max_cost_usd, on_usage)
         results: dict[str, SystemOutput] = {}
 
         async def one(doc_id: str, text: str) -> None:
@@ -202,9 +219,11 @@ class OpenAIExtractor:
                     )
                 except openai.APIError as exc:
                     return {}, usage, [f"{name}: API error {type(exc).__name__}: {exc}"[:300]]
+                except Exception as exc:  # one bad response must not sink a paid run
+                    return {}, usage, [f"{name}: {type(exc).__name__}: {exc}"[:300]]
             call_usage = self._usage(response)
             usage += call_usage
-            budget.spent += call_usage.cost_usd
+            budget.record(call_usage)
 
             if response.status == "incomplete":
                 if attempt == 0 and max_tokens < MAX_OUTPUT_TOKENS_CAP:

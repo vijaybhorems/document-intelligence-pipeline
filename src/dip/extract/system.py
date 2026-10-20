@@ -1,5 +1,6 @@
 """The interface every extraction system implements: baselines now, LLM pipelines from Phase 3."""
 
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -45,7 +46,13 @@ class System(Protocol):
         ...
 
     def predict_all(
-        self, texts: dict[str, str], max_cost_usd: float | None = None
+        self,
+        texts: dict[str, str],
+        max_cost_usd: float | None = None,
+        on_usage: Callable[[Usage], None] | None = None,
     ) -> dict[str, SystemOutput]:
-        """Predict every contract; may return fewer once ``max_cost_usd`` has been spent."""
+        """Predict every contract; may return fewer once ``max_cost_usd`` has been spent.
+
+        ``on_usage`` is called after every paid API call, for crash-safe spend tracking.
+        """
         ...

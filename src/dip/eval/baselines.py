@@ -12,11 +12,11 @@ contract. That's the gap a good prompt has to close.
 """
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from dip.eval.slices import has_cue
-from dip.extract.system import System, SystemOutput
+from dip.extract.system import System, SystemOutput, Usage
 from dip.schema.domain import (
     ClauseField,
     ClauseSet,
@@ -48,7 +48,10 @@ class SimpleSystem:
         return {}
 
     def predict_all(
-        self, texts: dict[str, str], max_cost_usd: float | None = None
+        self,
+        texts: dict[str, str],
+        max_cost_usd: float | None = None,
+        on_usage: Callable[[Usage], None] | None = None,
     ) -> dict[str, SystemOutput]:
         return {doc_id: SystemOutput(fields=self.predict(text)) for doc_id, text in texts.items()}
 

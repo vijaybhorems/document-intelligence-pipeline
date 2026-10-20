@@ -303,3 +303,45 @@ def test_llm_run_records_usage_and_ledger(tmp_path: Path) -> None:
     assert meta.config["strategy"] == "grouped"
     assert meta.usage.calls == 6
     assert spent_usd(tmp_path / "runs") == pytest.approx(meta.usage.cost_usd)
+
+
+class ExplodingResponses(FakeResponses):
+    """Raises a non-API exception for one group, like an unexpected SDK parsing error."""
+
+    async def parse(self, **kwargs: Any) -> SimpleNamespace:
+        if "- governing_law:" in kwargs["input"][2]["content"]:
+            raise ValueError("unexpected response shape")
+        return await super().parse(**kwargs)
+
+
+def test_unexpected_exception_is_contained_to_its_call() -> None:
+    out = _extractor(ExplodingResponses(ANSWERS)).predict_all({"d1": TEXT})["d1"]
+
+    assert out.fields.clauses.anti_assignment.present  # other groups still land
+    assert any("ValueError: unexpected response shape" in i for i in out.issues)
+
+
+def test_every_paid_call_is_reported_as_it_happens() -> None:
+    seen: list[float] = []
+    out = _extractor(FakeResponses(ANSWERS)).predict_all(
+        {"d1": TEXT}, on_usage=lambda u: seen.append(u.cost_usd)
+    )["d1"]
+
+    assert len(seen) == 6
+    assert sum(seen) == pytest.approx(out.usage.cost_usd)
+
+
+def test_spend_ledger_survives_a_run_without_run_json(tmp_path: Path) -> None:
+    from dip.eval.runs import USAGE_LEDGER
+    from dip.extract.system import Usage
+
+    crashed = tmp_path / "runs" / "crashed-run"
+    crashed.mkdir(parents=True)
+    (crashed / USAGE_LEDGER).write_text(
+        Usage(calls=1, cost_usd=0.25).model_dump_json()
+        + "\n"
+        + Usage(cost_usd=0.5).model_dump_json()
+        + "\n"
+    )
+
+    assert spent_usd(tmp_path / "runs") == pytest.approx(0.75)

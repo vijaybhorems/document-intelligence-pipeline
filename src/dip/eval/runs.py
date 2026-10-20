@@ -120,7 +120,13 @@ def predict(
     run_id = f"{now:%Y%m%d-%H%M%S}-{system.name}-{split}"
     run_dir = runs_dir / run_id
     (run_dir / "predictions").mkdir(parents=True)
-    outputs = system.predict_all(texts, max_cost_usd)
+    ledger = run_dir / USAGE_LEDGER
+
+    def record(usage: Usage) -> None:
+        with ledger.open("a", encoding="utf-8") as f:
+            f.write(usage.model_dump_json() + "\n")
+
+    outputs = system.predict_all(texts, max_cost_usd, record)
     total = Usage()
     for doc_id, out in outputs.items():
         total += out.usage
@@ -162,9 +168,23 @@ def load_predictions(run_dir: Path) -> dict[str, Prediction]:
     }
 
 
+USAGE_LEDGER = "usage.jsonl"
+
+
+def run_spend_usd(run_dir: Path) -> float:
+    """Spend for one run: the per-call ledger if present (crash-safe), else run.json."""
+    ledger = run_dir / USAGE_LEDGER
+    if ledger.exists():
+        lines = ledger.read_text("utf-8").splitlines()
+        return sum(Usage.model_validate_json(line).cost_usd for line in lines if line.strip())
+    if (run_dir / "run.json").exists():
+        return load_meta(run_dir).usage.cost_usd
+    return 0.0
+
+
 def spent_usd(runs_dir: Path) -> float:
     """Total recorded spend across every run: the ledger behind the budget guard."""
-    return sum(load_meta(d).usage.cost_usd for d in runs_dir.glob("*") if (d / "run.json").exists())
+    return sum(run_spend_usd(d) for d in runs_dir.glob("*") if d.is_dir())
 
 
 def score_run(run_dir: Path, data_dir: Path) -> list[FieldResult]:
