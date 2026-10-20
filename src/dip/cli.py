@@ -152,6 +152,9 @@ EffortOpt = Annotated[
     str | None, typer.Option(help="Reasoning effort (default: DIP_REASONING_EFFORT).")
 ]
 SplitOpt = Annotated[str, typer.Option(callback=_check_split)]
+PromptOpt = Annotated[
+    str | None, typer.Option("--prompt-version", help="v1 | v2 | v3 | v4 (decision D5).")
+]
 OwnSchemaOpt = Annotated[
     bool,
     typer.Option(
@@ -164,11 +167,19 @@ MaxCostOpt = Annotated[
 
 
 def _make_system(
-    system: str, model: str | None, strategy: str, effort: str | None, own_schema: bool = False
+    system: str,
+    model: str | None,
+    strategy: str,
+    effort: str | None,
+    own_schema: bool = False,
+    prompt_version: str | None = None,
 ) -> "System":
     from dip.eval.baselines import SYSTEMS
+    from dip.extract import prompts
     from dip.extract.extractor import OpenAIExtractor, Strategy
 
+    if prompt_version is not None and prompt_version not in prompts.FEATURES:
+        raise typer.BadParameter(f"--prompt-version must be one of {list(prompts.FEATURES)}")
     if system in SYSTEMS:
         return SYSTEMS[system]
     if system != "llm":
@@ -183,6 +194,7 @@ def _make_system(
         strategy=Strategy(strategy),
         reasoning_effort=effort or settings.reasoning_effort,
         shared_schema=not own_schema,
+        prompt_version=prompt_version or prompts.CURRENT_VERSION,
         max_concurrency=settings.max_concurrency,
         timeout_s=settings.request_timeout_s,
         api_key=settings.openai_api_key.get_secret_value(),
@@ -228,9 +240,14 @@ def estimate(
     strategy: StrategyOpt = "grouped",
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
+    prompt_version: PromptOpt = None,
 ) -> None:
     """Estimate a run's tokens and cost without calling the API."""
-    _budget_check(_make_system(system, model, strategy, effort, own_schema), split, max_cost=None)
+    _budget_check(
+        _make_system(system, model, strategy, effort, own_schema, prompt_version),
+        split,
+        max_cost=None,
+    )
 
 
 @app.command()
@@ -254,13 +271,14 @@ def predict(
     strategy: StrategyOpt = "grouped",
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
+    prompt_version: PromptOpt = None,
     max_cost_usd: MaxCostOpt = None,
 ) -> None:
     """Run a system over a split and save its predictions as a new run."""
     from dip.eval.runs import load_meta
     from dip.eval.runs import predict as run_predict
 
-    built = _make_system(system, model, strategy, effort, own_schema)
+    built = _make_system(system, model, strategy, effort, own_schema, prompt_version)
     cap = _budget_check(built, split, max_cost_usd)
     from dip.observability.tracing import shutdown_tracing
 
@@ -328,6 +346,7 @@ def eval_cmd(
     strategy: StrategyOpt = "grouped",
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
+    prompt_version: PromptOpt = None,
     max_cost_usd: MaxCostOpt = None,
     compare: Annotated[str | None, typer.Option(help="run_id to compare against.")] = None,
     out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
@@ -335,7 +354,7 @@ def eval_cmd(
     """predict + score + report in one go."""
     from dip.eval.runs import predict as run_predict
 
-    built = _make_system(system, model, strategy, effort, own_schema)
+    built = _make_system(system, model, strategy, effort, own_schema, prompt_version)
     cap = _budget_check(built, split, max_cost_usd)
     from dip.observability.tracing import shutdown_tracing
 
@@ -405,6 +424,30 @@ def validate(
     typer.echo(f"run: {run_dir.name}  (re-ask cost ${meta.usage.cost_usd:.4f})")
     score(run_dir.name)
     report(run_dir.name, compare=compare or run_id, out=out)
+
+
+# ── Phase 5: prompting and context ───────────────────────────────────────────
+
+
+@app.command("build-field-notes")
+def build_field_notes_cmd() -> None:
+    """Rebuild prompt variants and examples from TRAIN gold (prompts/field_notes.json)."""
+    from importlib.resources import files
+
+    from dip.eval.runs import contract_text, load_gold
+    from dip.extract import prompts
+    from dip.extract.examples import build_field_notes, write_field_notes
+
+    data = get_settings().data_dir
+    train = load_gold(data, "train")  # never dev or test: that would leak labels into prompts
+    notes = build_field_notes((r, contract_text(data, r)) for r in train.values())
+    target = Path(str(files(prompts).joinpath(prompts.FIELD_NOTES_FILE)))
+    write_field_notes(notes, target)
+    typer.echo(
+        f"Wrote {target} from {len(train)} train contracts: "
+        f"{sum(bool(n.variants) for n in notes.values())} fields with variants, "
+        f"{sum(bool(n.hard_negative) for n in notes.values())} with hard negatives"
+    )
 
 
 if __name__ == "__main__":

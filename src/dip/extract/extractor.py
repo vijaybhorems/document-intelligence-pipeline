@@ -229,7 +229,10 @@ class OpenAIExtractor:
                                 "role": "system",
                                 "content": prompts.system_prompt(self.prompt_version),
                             },
-                            {"role": "user", "content": prompts.contract_message(text)},
+                            *(
+                                {"role": "user", "content": m}
+                                for m in prompts.context_messages(text, self.prompt_version)
+                            ),
                             {
                                 "role": "user",
                                 "content": prompts.fields_prompt(

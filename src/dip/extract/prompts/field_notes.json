@@ -1,0 +1,328 @@
+{
+  "document_name": {
+    "variants": []
+  },
+  "parties": {
+    "variants": [],
+    "positive": "This agreement shall apply to said ABW and all of its subsidiaries and related companies."
+  },
+  "agreement_date": {
+    "variants": []
+  },
+  "effective_date": {
+    "variants": [],
+    "positive": "It shall be effective on 06 October 2000 and shall have a duration of two years."
+  },
+  "governing_law": {
+    "variants": [
+      "This Agreement shall be governed and construed according to the law of Tennessee.",
+      "Effective legislation of the Republic of Kazakhstan shall apply to any relations of the Parties arising out of this Contract.",
+      "This Agreement shall be governed and construed in accordance with the law set forth in the ExxonMobil Selling Affiliate's general terms and conditions, as applicable."
+    ],
+    "positive": "This Agreement shall be construed in accordance with the laws of the State of Kansas.",
+    "hard_negative": "The parties further agree that if Distributor places Purchase Orders after the expiration of the Agreement, and Cisco accepts such Purchase Orders, then any such Purchase Orders shall be governed by the terms and conditions of the Agreement;"
+  },
+  "expiration_date": {
+    "variants": [
+      "This agreement shall be for a term of five years from the date of this document.",
+      "It shall be effective on 06 October 2000 and shall have a duration of two years.",
+      "The term of the Franchise shall be twenty (20) years, commencing on January 1, 2016."
+    ],
+    "positive": "The initial term of the ctDNA Platform Development Program will be twelve (12) months.",
+    "hard_negative": "Such notice must be given ninety (90) days prior to expiration of the original term."
+  },
+  "renewal_term": {
+    "variants": [
+      "Without notification the contract will automatically extend for an additional month of service.",
+      "The Parties may negotiate for an extension of this Agreement six (6) months before the expiration of the Cooperation Period.",
+      "The Term will be 3 years from Effective Date with an automatic 2 year term extensions unless otherwise advised by one of the Parties."
+    ],
+    "positive": "Thereafter the term of this Agreement shall automatically renew for consecutive periods of two (2) years each.",
+    "hard_negative": "The parties shall then engage in discussions regarding renewal for a period of 30 days."
+  },
+  "notice_period_to_terminate_renewal": {
+    "variants": [
+      "The Term will be 3 years from Effective Date with an automatic 2 year term extensions unless otherwise advised by one of the Parties.",
+      "Pretzel Time shall notify Franchisee of the nonrenewal not less than six (6) months prior to the expiration of the term of this Agreement.",
+      "This Agreement will renew automatically thereafter for successive one-year terms unless and until one Party gives notification of termination with at least sixty (60) days written notice."
+    ],
+    "positive": "This Agreement shall automatically renew for successive one-year terms unless one party gives the other party written notice of non-renewal at least six months prior to automatic renewal.",
+    "hard_negative": "Any Party hereto may terminate this Agreement at any time upon prior written notice."
+  },
+  "termination_for_convenience": {
+    "variants": [
+      "Either party may terminate this Agreement at any time with 30 days written notice.",
+      "Either party may terminate this agreement at any time with 30 days written notice.",
+      "Any Party hereto may terminate this Agreement at any time upon prior written notice."
+    ],
+    "positive": "Either party shall have the right to terminate this Agreement at any time for any reason.",
+    "hard_negative": "Upon termination of this Agreement for any reason, HSNS shall (except as provided in Section 12."
+  },
+  "change_of_control": {
+    "variants": [
+      "Any change in the control of you shall be deemed a transfer for purposes of this Agreement.",
+      "You may not permit the Franchised Business to be operated, managed, directed, or controlled by any other person without our prior written consent.",
+      "If Seller elects to exercise any of its rights under the preceding paragraph, Seller shall so notify Buyer, in writing, within forty-five (45) days after receipt of Buyer's notice."
+    ],
+    "positive": "A Change of Control shall be deemed an assignment for purposes of this Agreement.",
+    "hard_negative": "A change of control of Rogers shall not be considered an assignment of this Agreement."
+  },
+  "anti_assignment": {
+    "variants": [
+      "Title to all Joint Venture Property will remain in the name of the Joint Venture.",
+      "Any purported transfer or other encumbrance without such consent shall be void ab initio.",
+      "In the event of a Change of Control (as defined below) this Agreement shall immediately terminate."
+    ],
+    "positive": "Any attempted assignment not in accordance with this Section 13.2 shall be void.",
+    "hard_negative": "This Agreement shall be binding on all parties' respective assigns and successors."
+  },
+  "post_termination_services": {
+    "variants": [
+      "Said books and records shall be maintained for a two (2) year period following the expiration or termination of this Agreement.",
+      "Kitov shall be entitled to sell or otherwise dispose of its remaining stock of the Product until the end of the inventory's shelf life.",
+      "This right to audit shall extend throughout the term of this Agreement and for one year after expiration or termination of this Agreement."
+    ],
+    "positive": "Upon termination, Consultant agrees to perform the necessary information transfer required at the time.",
+    "hard_negative": "Upon termination of this Agreement pursuant to this Section 10, COMPANY will: 10."
+  },
+  "non_compete": {
+    "variants": [
+      "Moelis Holdings agrees not to open an office in Japan conducting Covered Businesses during the term of this Agreement.",
+      "You agree not to engage in any of the sales activities that we have reserved to ourselves in Sections 1.3 [Our Limitations and Our Reserved Rights] above.",
+      "Products. Any failure of Endorser to disclose such conflicting interests, or any breach of this Section, shall be deemed a material breach of the Agreement."
+    ],
+    "positive": "Agent may not offer or promote competitive products without the consent of Kallo.",
+    "hard_negative": "Any arbitration award will be final and shall be enforceable in any court of competent jurisdiction."
+  },
+  "exclusivity": {
+    "variants": [
+      "The Distributor shall not order or purchase Products from any source other than the Company.",
+      "Oceanic Time Warner Cable will use the content solely on channel 777, the Las Vegas channel.",
+      "Qualigen shall supply Sekisui with all of Sekisui's commercial requirements for the Product in the Applicable Markets."
+    ],
+    "positive": "Schoolpop shall have the exclusive right to resell Cards in the NPO Marketplace.",
+    "hard_negative": "Such liability shall not be exclusive of any other provisions of this Agreement."
+  },
+  "no_solicit_of_customers": {
+    "variants": [
+      "Distributor may not sell or license Products directly to end use customers without the express written consent of NETGEAR.",
+      "Sekisui shall not, and shall cause its subdistributors not to, market, rent or sell any Products to the Qualigen Retained Customers. 3. Supply;",
+      "You may not enter into any relationship with a Major Account customer that we deem to conflict with the customer's Major Account arrangement with us."
+    ],
+    "positive": "Other AIRSOPURE franchisees will not be permitted to solicit customers for Products by advertising in Your Exclusive Territory.",
+    "hard_negative": "Accordingly, Forty Niners SC shall not solicit or enter into sponsorships with such Parties."
+  },
+  "competitive_restriction_exception": {
+    "variants": [
+      "It is agreed that ownership of no more than 1% of the outstanding voting stock of a publicly traded corporation will not constitute a violation of Section 7.3.",
+      "We will not grant other franchises nor establish our own Unit Franchises within the Master Territory during the term of this Agreement unless you do not meet the Minimum Development Quota.",
+      "Schoolpop understands and agrees that this Agreement does not grant Schoolpop any exclusive right to market the Cards or any other AEIS products and services outside of the NPO Marketplace."
+    ],
+    "positive": "Notwithstanding the above, Bioamber shall be permitted to evaluate other biocatalysts, but shall not undertake development of such biocatalysts.",
+    "hard_negative": "The Distributor shall not disclose this agreement except upon consent of Company."
+  },
+  "no_solicit_of_employees": {
+    "variants": [],
+    "positive": "In turn, UTEK agrees that it will not directly or indirectly solicit any present employee of MKOS.",
+    "hard_negative": "Application Provider may not use Payment-Eligible User Data to solicit User traffic to www."
+  },
+  "non_disparagement": {
+    "variants": [
+      "CONSULTANT agrees to act in good faith so as to not harm the business reputation of the Company in any way.",
+      "The Company shall not tarnish or bring into disrepute the reputation of or goodwill associated with the Seller Licensed Trademarks or Arizona.",
+      "Company and North shall at all times deal with each other in good faith and strive to maintain and enhance each other's positive image and reputation."
+    ],
+    "positive": "The Agent shall not use or facilitate the use of promotional materials which disparage Roundup Products or Industrial Property.",
+    "hard_negative": "Affiliate agrees not to use the Licensed Materials in any manner that is disparaging or that otherwise portrays Chase in a negative light."
+  },
+  "most_favored_nation": {
+    "variants": [
+      "The parties agree that Client will not be charged a higher fee than what is being made available by EFS to its other Clients for similar services.",
+      "In accordance with Section 3.6 below, at no time shall any Product price exceed the lowest price for which Zanotti sells such Product (or substantial equivalent thereof) in similar quantities to any third party.",
+      "The Company acknowledges that Nantz Communications' and Nantz's obligations to CBS or any other television station or network with which Nantz Communications or Nantz has a contract or arrangement shall take precedence over any other commitments of Nantz Communications or Nantz under this Agreement."
+    ],
+    "positive": "Party B guarantees that the Driver User will enjoy the most favorable treatment in accordance with the terms and conditions stipulated in This Agreement during the Period of Cooperation.",
+    "hard_negative": "Trust agrees to treat the Administrator's customers no less favorably than Trust treats other Fund shareholders in applying the provisions of paragraphs 9(b) and 9(c)."
+  },
+  "rofr_rofo_rofn": {
+    "variants": [
+      "Pretzel Time shall have the unrestricted right to assign this option to purchase.",
+      "As the preferred manufacturer, LKPL shall have first right of refusal on all such RFMs.",
+      "Sponsor shall have the opportunity to purchase the suite for the postseason at prevailing prices, as available."
+    ],
+    "positive": "DCL shall first offer all Surplus Vehicles that DCL wishes to sell for sale to SEV."
+  },
+  "revenue_profit_sharing": {
+    "variants": [
+      "MediaNet shall remit to Member Provider 20% of the price of each Portal sold directly by it.",
+      "For the rest of the world, the economic rights will be divided as follows: *% Kiromic; *% Molipharma.",
+      "NVOS common stock will be delivered to HGF via Novo Healthnet Limited (\"NHL\") exchangeable preferred shares."
+    ],
+    "positive": "ETON shall pay to Aucta a royalty payment of [ * * * ] of Net Sales of the Products.",
+    "hard_negative": "SUCH MATERIAL WILL BE FILED SEPARATELY WITH THE SECURITIES AND EXCHANGE COMMISSION."
+  },
+  "price_restrictions": {
+    "variants": [
+      "VOTOCAST will give Licensee at least thirty (30) days prior written notice of any rate changes during any Renewal Term.",
+      "To the extent that the Village Media Company and PFHOF work collaboratively on media projects, the EP's services on such projects for the benefit of PFHOF shall be charged to PFHOF at cost without markup.",
+      "If circumstances require VOTOCAST to raise its rates more than ten percent (10%) during any Renewal Term, VOTOCAST will provide Licensee cost related supporting documentation to justify the rate increase."
+    ],
+    "positive": "Following the Initial Price Term, the Price of such Product may be adjusted only as set forth in Section 3.1(b) and Section 3.2.",
+    "hard_negative": "All royalties paid to Developer shall be based upon Developer's list prices in U."
+  },
+  "minimum_commitment": {
+    "variants": [
+      "You shall expend not less than $5,000 each month on such Solicitation Advertising.",
+      "However, the commission will never be less than $0.05 per MMBTU regardless of fuel price.",
+      "COMWARE must purchase no less than $22,710.00 worth of Products, in any combination, by April 15, 2000."
+    ],
+    "positive": "Channel Partner will have at a minimum one (1) web page describing the iPass Services.",
+    "hard_negative": "Each report will cover a minimum six (6) calendar month period each calendar year during the Term."
+  },
+  "volume_restriction": {
+    "variants": [
+      "At its discretion, Excite@Home may include up to five rotating links on the My Excite Start Page (\"MESP\").",
+      "The distribution limits stated above are the maximum number of Pin Codes that may be distributed in the Promotion.",
+      "The supplier will provide no more than two major code releases of OPS during a calendar year without Bank of America's consent."
+    ],
+    "positive": "TPC agrees that such photograph shoots shall not exceed five (5) hours each in duration.",
+    "hard_negative": "In no event shall the authority of a Working Group exceed that of the JDRC or JCC."
+  },
+  "audit_rights": {
+    "variants": [
+      "(ii) access to HSNS's facilities and office support as may be reasonably requested by E.piphany;",
+      "Diplomat will be required to notify Tadeo at least five business days before the date of planned examination.",
+      "MD Anderson shall make such records available to LBIO upon reasonable notice during MD Anderson's normal business hours."
+    ],
+    "positive": "Prompt adjustments shall be made by the Parties to reflect the results of such audit.",
+    "hard_negative": "When available, such third party audit reports will be at Excite's cost and expense."
+  },
+  "insurance": {
+    "variants": [
+      "HERC shall provide for ten (10) days notice to THC and HSI in the event of any modification, cancellation or termination.",
+      "If applicable, Vendor will maintain Products/Completed Operations for at least two (2) years following completion of the Work.",
+      "Each party agrees to give the other party written notice, promptly, of any material change in or cancellation of coverages or limits."
+    ],
+    "positive": "You must maintain insurance related to your operation of the Franchised Business.",
+    "hard_negative": "MacroGenics shall include Green Cross as a named insured on each such policy acquired by MacroGenics."
+  },
+  "ip_ownership_assignment": {
+    "variants": [
+      "Surgical agrees that all Work Product shall be the sole and exclusive property of Imprimis.",
+      "Upon any termination or expiration of this Agreement, EKR shall promptly transfer the Domain Names back to PPI.",
+      "(d) EKR shall assign to PPI free of charge any domain name registrations it has registered pursuant to Section 8.5;"
+    ],
+    "positive": "FCE will assign, and hereby assigns, to ExxonMobil ownership of Program Results.",
+    "hard_negative": "Distributor shall not take any action inconsistent with Airspan's ownership of such Trademarks;"
+  },
+  "joint_ip_ownership": {
+    "variants": [],
+    "positive": "Upon termination of the Agreement, VerticalNet and Impresse shall jointly own all User Data.",
+    "hard_negative": "The parties shall establish a joint marketing effort for the Strategic Alliance."
+  },
+  "license_grant": {
+    "variants": [
+      "During the Term, MusclePharm shall have the right to create and distribute the Promotional Products world- wide.",
+      "The Intellectual Property granted to Party B shall only be used to the scope of Party B's Business operated by Party B.",
+      "In addition, Party A shall not use the functions and information provided by Party B to carry out any commercial activities."
+    ],
+    "positive": "Joint Improvements shall be owned jointly by the Parties, and PPI's interest therein shall be licensed to EKR hereunder.",
+    "hard_negative": "Licensee may change the Designated Support Contact(s) upon written notice to XACCT;"
+  },
+  "non_transferable_license": {
+    "variants": [
+      "WCC shall have the right of prior written approval over all uses of the Trademarks by XLI.",
+      "XLI shall have the right of prior written approval over all uses of the trademark \"XLI\" by WCC.",
+      "The Research License shall be provided to Bioamber only, with no rights to sublicense and with no \"have made\" rights."
+    ],
+    "positive": "Airspan grants Distributor, and Distributor hereby accepts, a nonexclusive, non-transferable license to use, and to sublicense as set forth below, Software provided by Airspan hereunder only on a single System or unit of Equipment, as may be applicable."
+  },
+  "affiliate_license_licensor": {
+    "variants": [
+      "Certegy hereby assigns, and shall cause each member of the Certegy Group to assign, to Equifax, or the respective Designated Equifax Member, all right, title and interest it may hold in and to such modifications, improvements, Equifax Enhancements and Derivative Works."
+    ],
+    "positive": "FG shall have access to and the right to use for any purpose, any Data developed by or on behalf of Astellas or its Affiliates or Sublicensees in the course of the Development Program with respect to indications within the Field for Lead Compounds.",
+    "hard_negative": "Each Party will be liable for breach of this Article 10 by any of its Affiliates."
+  },
+  "affiliate_license_licensee": {
+    "variants": [
+      "Any such sublicense may be made effective retroactively, but not prior to the effective date hereof, nor prior to the sublicensee's becoming a Related Company."
+    ],
+    "positive": "An entity may transfer its right to use a certain piece of Software to its Affiliate.",
+    "hard_negative": "Each Party will be liable for breach of this Article 10 by any of its Affiliates."
+  },
+  "unlimited_all_you_can_eat_license": {
+    "variants": [
+      "Multiple viewings of the Licensed Program shall be permitted during the Viewing Period for no additional fee and all such viewings shall be considered a single exhibition of the Licensed Program for the purposes of calculating License Fees hereunder."
+    ],
+    "positive": "Bioamber hereby grants Cargill, and Cargill hereby accepts, an exclusive, worldwide, royalty-free license with an unlimited right to sublicense under and to Bioamber Improvements for use outside the Field during the term of this Development Agreement. Such use shall be for research purposes only.",
+    "hard_negative": "The Joint Venture Company shall be an enterprise legal person under the laws of China."
+  },
+  "irrevocable_or_perpetual_license": {
+    "variants": [],
+    "positive": "The term of the license for the Images delivered to HSWI as part of the Affinity, shall be perpetual and irrevocable.",
+    "hard_negative": "The license granted to the Licensee under this Agreement shall continue perpetually."
+  },
+  "source_code_escrow": {
+    "variants": [
+      "Bank of America shall notify Supplier of the dates on which any such verification will be conducted, and the results thereof.",
+      "DIALOG agrees not to exercise such license until occurrence of a Release Condition, subject to the other restrictions set forth in this Section 16.",
+      "TELKOM shall USE the Source Code only at its own premises on its own data processing equipment or third parties in accordance with clause 3 of the AGREEMENT."
+    ],
+    "positive": "Corio shall bear all fees, expenses and other charges to open and maintain such escrow account.",
+    "hard_negative": "There may be other stores in which state administrators have required fees or royalties to be deferred or escrowed."
+  },
+  "covenant_not_to_sue": {
+    "variants": [
+      "(c) the Company shall not represent or make any claim that it has an ownership interest in any Arizona Licensed IP.",
+      "Distributor acknowledges Zogenix's exclusive ownership of the Product Trademarks and agrees not to take any action inconsistent with such ownership.",
+      "Distributor acknowledges Zogenix's exclusive ownership of the Zogenix Trademarks and agrees not to take any action inconsistent with such ownership."
+    ],
+    "positive": "You shall not directly or indirectly contest the validity of the ownership of the Licensed Marks.",
+    "hard_negative": "In the event that Supplier challenges the Notice of Rejection, Customer and Supplier shall conduct a joint investigation."
+  },
+  "uncapped_liability": {
+    "variants": [
+      "Nothing in this Section 8.7 shall operate to limit or exclude any liability under Section 8.5 with respect to a Claim, or for fraud, or for breach by a Party of the provisions of Article 7.",
+      "THE LIMITATIONS ON LIABILITY FOR DAMAGES SET FORTH IN THIS AGREEMENT SHALL BE INAPPLICABLE TO EACH PARTY'S CONTRACTUAL OBLIGATION TO INDEMNIFY THE OTHER PARTY AS SET FORTH IN SECTIONS 2.6 AND 13.",
+      "The provisions of Section 9.1 and Section 9.2 will not apply to limit the Licensee's indemnification obligations under Section 8.2, or in the case of Licensee's gross negligence or wilful misconduct."
+    ],
+    "positive": "Except for claims arising under section 6, in no event will either party be liable for any special, indirect, incidental or consequential damages.",
+    "hard_negative": "The Distributor shall not disclose this agreement except upon consent of Company."
+  },
+  "cap_on_liability": {
+    "variants": [
+      "The sole remedy for any breach of Section 6.2 (e) shall be the provisions in Section 7.2.",
+      "In any event, neither party shall be liable for any special, consequential or incidental damages.",
+      "The sole remedy for any breach of Section 6.1 (d) and (e) shall be the provisions in Section 7.1."
+    ],
+    "positive": "Such liability shall not exceed the other Party's contractual liability to its customers.",
+    "hard_negative": "(3) The monthly average daily non-default traffic shall not exceed the default traffic."
+  },
+  "liquidated_damages": {
+    "variants": [
+      "In the event Duval does not meet the Minimum Annual Performance Requirements for a Contract Year, $375,000 of the Additional License Fee will be deemed to be unearned.",
+      "In the event the Company terminates the Agreement in accordance with Section 16, any unearned Additional License Fee will be fully refundable and due the Company as set forth in Section 16.",
+      "For the third time of the aforementioned violation, Party A will withhold the full amount of the performance bond already paid by Party B, and terminate the full-range business cooperation for one year."
+    ],
+    "positive": "In any event, the total liquidated damages as per this Section shall not exceed 5% of the Product Price.",
+    "hard_negative": "The penalty, however, shall not exceed 5% of the total value of the goods involved in the late delivery."
+  },
+  "warranty_duration": {
+    "variants": [
+      "In the absence of such notification, Astellas shall be deemed to have accepted the shipment.",
+      "ITS will provide free technical support to customers who have purchased ITS systems for a period of 30 days.",
+      "The Company shall not have any obligation with respect to Products after 365 days following delivery to Distributor, except as provided herein."
+    ],
+    "positive": "Changepoint will replace any defective media returned to Changepoint during the Warranty Period.",
+    "hard_negative": "VIP warrants that all EDP Services shall be performed in a prompt and workmanlike manner."
+  },
+  "third_party_beneficiary": {
+    "variants": [
+      "Notwithstanding the foregoing, UTK may assign this Agreement or any portion of its Compensation as outlined herein to its subsidiaries in its sole discretion.",
+      "With respect to any Indemnified Party who is not a party to this Agreement, the Agents shall obtain and hold the rights and benefits of this Section 11 in trust for and on behalf of such Indemnified Party."
+    ],
+    "positive": "Lessor and Lessee expressly agree that Franchisor is a third party beneficiary of this Addendum.",
+    "hard_negative": "The Beneficiary shall not be entitled to assign or transfer any right, title or interest in this StandBy Letter of Credit to any other party."
+  }
+}

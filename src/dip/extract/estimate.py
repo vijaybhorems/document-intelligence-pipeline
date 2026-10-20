@@ -74,7 +74,9 @@ def estimate(extractor: OpenAIExtractor, texts: dict[str, str]) -> Estimate:
 
     input_tokens = cacheable = 0
     for text in texts.values():
-        prefix = system + _tokens(prompts.contract_message(text))
+        prefix = system + sum(
+            _tokens(m) for m in prompts.context_messages(text, extractor.prompt_version)
+        )
         input_tokens += sum(
             prefix + extra + schema
             for extra, schema in zip(per_call_extra, per_call_schema, strict=True)
