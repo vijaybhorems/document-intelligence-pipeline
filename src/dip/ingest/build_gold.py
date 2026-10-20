@@ -31,6 +31,8 @@ from dip.schema.domain import (
     LabelIssue,
     PartyListField,
     TextField,
+    field_of,
+    is_present,
 )
 from dip.schema.registry import FIELDS, FieldSpec, FieldType
 from dip.validate.normalize import (
@@ -155,17 +157,8 @@ def gold_record(doc: CuadDocument) -> GoldRecord:
 # ── Output ───────────────────────────────────────────────────────────────────
 
 
-def is_present(record: GoldRecord, spec: FieldSpec) -> bool:
-    """A field is present if it was labelled: a span, or a parsed value."""
-    if spec.field_type is FieldType.CLAUSE:
-        return getattr(record.fields.clauses, spec.name).present
-    field = getattr(record.fields, spec.name)
-    value = field.model_dump(exclude={"evidence", "raw_text"})
-    return bool(field.evidence) or any(v not in (None, [], False) for v in value.values())
-
-
 def present_fields(record: GoldRecord) -> frozenset[str]:
-    return frozenset(spec.name for spec in FIELDS if is_present(record, spec))
+    return frozenset(spec.name for spec in FIELDS if is_present(field_of(record.fields, spec.name)))
 
 
 def _field_rows(record: GoldRecord) -> list[tuple[object, ...]]:
@@ -187,7 +180,7 @@ def _field_rows(record: GoldRecord) -> list[tuple[object, ...]]:
                 spec.name,
                 spec.field_type.value,
                 spec.group.value,
-                is_present(record, spec),
+                is_present(field),
                 len(field.evidence),
                 sum(len(e.quote) for e in field.evidence),
                 raw,

@@ -8,7 +8,7 @@ Definitions are adapted from the CUAD v1 README (CC BY 4.0, The Atticus Project)
 ``CUAD_v1.json``, which differs from the README's display names in places.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 
@@ -59,7 +59,7 @@ class FieldSpec:
 
 _T, _G = FieldType, FieldGroup
 
-FIELDS: tuple[FieldSpec, ...] = (
+_FIELDS: tuple[FieldSpec, ...] = (
     # ── Typed fields (8) ────────────────────────────────────────────────────
     FieldSpec("document_name", "Document Name", _T.TEXT, _G.GENERAL, "The name of the contract."),
     FieldSpec(
@@ -383,6 +383,58 @@ FIELDS: tuple[FieldSpec, ...] = (
         "Is there a non-contracting party who is a beneficiary to some or all of the clauses "
         "in the contract and therefore can enforce its rights against a contracting party?",
     ),
+)
+
+# The obvious wording for each field, matched as word prefixes ("own" matches
+# "ownership", not "known"). A gold span containing a cue is "canonical"; the
+# phrasing slice (SPEC §10.6) compares recall on canonical vs non-canonical spans.
+# Parties and agreement/effective dates have no cues: their spans are names or
+# date strings, not phrasing.
+CANONICAL_CUES: dict[str, tuple[str, ...]] = {
+    "document_name": ("agreement",),
+    "governing_law": ("governed by", "governing law", "laws of"),
+    "expiration_date": ("expir", "initial term", "term of this agreement"),
+    "renewal_term": ("renew",),
+    "notice_period_to_terminate_renewal": ("non-renewal", "not to renew", "prior written notice"),
+    "termination_for_convenience": ("for convenience", "without cause", "for any reason"),
+    "change_of_control": ("change of control", "change in control"),
+    "anti_assignment": ("assign",),
+    "post_termination_services": ("after termination", "upon termination", "post-termination",
+                                  "following termination", "surviv"),
+    "non_compete": ("compet",),
+    "exclusivity": ("exclusiv",),
+    "no_solicit_of_customers": ("solicit",),
+    "competitive_restriction_exception": ("notwithstanding", "except", "nothing in this"),
+    "no_solicit_of_employees": ("solicit",),
+    "non_disparagement": ("disparag",),
+    "most_favored_nation": ("most favo", "no less favo", "more favo"),
+    "rofr_rofo_rofn": ("right of first", "first refusal", "first offer", "first negotiation"),
+    "revenue_profit_sharing": ("royalt", "revenue", "profit", "commission"),
+    "price_restrictions": ("price", "pricing"),
+    "minimum_commitment": ("minimum",),
+    "volume_restriction": ("exceed", "in excess of"),
+    "audit_rights": ("audit", "inspect", "books and records"),
+    "insurance": ("insur",),
+    "ip_ownership_assignment": ("ownership", "hereby assign", "sole property"),
+    "joint_ip_ownership": ("joint", "co-own", "shared"),
+    "license_grant": ("licens", "licenc"),
+    "non_transferable_license": ("non-transferable", "nontransferable", "not transferable",
+                                 "non-assignable", "non-sublicensable"),
+    "affiliate_license_licensor": ("affiliate",),
+    "affiliate_license_licensee": ("affiliate",),
+    "unlimited_all_you_can_eat_license": ("unlimited", "enterprise", "all you can eat"),
+    "irrevocable_or_perpetual_license": ("irrevocabl", "perpetual"),
+    "source_code_escrow": ("escrow",),
+    "covenant_not_to_sue": ("not to sue", "contest", "challenge"),
+    "uncapped_liability": ("shall not apply", "not be limited", "unlimited", "except"),
+    "cap_on_liability": ("in no event", "shall not exceed", "limitation of liability", "maximum"),
+    "liquidated_damages": ("liquidated damages", "termination fee", "penalt"),
+    "warranty_duration": ("warrant",),
+    "third_party_beneficiary": ("third party beneficiar", "third-party beneficiar", "beneficiar"),
+}  # fmt: skip
+
+FIELDS: tuple[FieldSpec, ...] = tuple(
+    replace(f, canonical_cues=CANONICAL_CUES.get(f.name, ())) for f in _FIELDS
 )
 
 FIELDS_BY_NAME: dict[str, FieldSpec] = {f.name: f for f in FIELDS}
