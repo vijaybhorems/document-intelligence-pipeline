@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.6 |
+| **Status** | Draft v0.7 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-20 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -124,7 +124,7 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 | D1 | **Parser / extraction route** | pypdf (text layer only), Docling (layout + OCR), LlamaParse, **multimodal model reading the PDF directly** | §6.4 bake-off on the experiment set: clean PDFs **and** synthetic scans | per-type F1, cost/doc, p95 latency, failure rate | 6 |
 | D2 | **Extraction model** | ≥1 small/cheap and ≥1 large current model (OpenAI). Optionally an Anthropic model. | Same prompts and parser, experiment set | per-type F1, cost/doc, latency | 6 |
 | D3 | **How much context to send** | full document · retrieved sections only · retrieved sections + definitions | §7.4 | recall per type (especially rare clauses), input tokens/doc | 5 |
-| D4 | **Field grouping** | 1 call for all 41 fields · ~5 grouped calls · 1 call per field | Experiment set | F1, cost, latency | 3 |
+| D4 | **Field grouping** | 1 call for all 41 fields · ~5 grouped calls · 1 call per field | Experiment set | F1, cost, latency | 3 · **decided: single call** ([ADR](adr/D4-field-grouping.md)) |
 | D5 | **Prompt strategy** | zero-shot definitions · + phrasing variants · + few-shot from train · + defined-terms injection | §7.2–7.3, ablation one step at a time | F1 overall + **non-canonical phrasing recall** (§10.6) | 5 |
 | D6 | **Where validation goes** | strict schema only · schema + post-hoc validators · post-hoc + re-ask with validation errors | §8.4 | valid-output rate, hallucination rate, precision, extra cost | 4 |
 | D7 | **Grounding policy** | keep ungrounded values with a warning · drop them | §8.3 | precision vs recall trade-off per type | 4 |
@@ -332,7 +332,12 @@ Documents aren't written to a standard. The same field shows up phrased five dif
 
 ### 7.1 Baseline prompt (prompt v1)
 
-- **Layout for caching:** `[system instructions] [document] [field-group instructions]`. The shared prefix is reused across group calls, so OpenAI's automatic prompt caching (prefixes of 1024+ tokens) cuts cost. Verify by reading `cached_tokens` from usage.
+- **Layout for caching:** `[system instructions] [document] [field-group instructions]`. The shared prefix is reused across calls, so OpenAI's automatic prompt caching (prefixes of 1024+ tokens) cuts cost. Verify by reading `cached_tokens` from usage.
+- **Phase 3 findings on caching:**
+  - **The Structured Outputs schema is part of the cached prefix.** A different schema per call gets 0 cached tokens, so multi-call strategies share one nullable schema.
+  - **Within a run, concurrent calls hit the cache poorly** (about 20%), even with identical prefixes. **Across runs it works** (about 100%).
+  - Budget with the no-cache estimate.
+  - D4 chose a single call per contract anyway ([ADR D4](adr/D4-field-grouping.md)).
 - Field instructions come from registry `definition`s (adapted from CUAD's category definitions).
 - The model must give a **verbatim quote** for every non-null or present value, and it is told: *"If the document does not contain it, return null / present=false. Do not infer."*
 - **Prompts are versioned files** (`extract/prompts/v{N}/*.jinja`). Every record stores `prompt_version`.
@@ -365,7 +370,7 @@ Retrieval usually cuts tokens sharply but **loses recall on rare, oddly-placed c
 
 ### 7.5 Model configuration
 
-`EXTRACTION_MODEL`, `temperature`, `max_output_tokens`, `timeout`, `max_retries`, `PROMPT_VERSION` and `ROUTE` all live in config (`pydantic-settings` + experiment YAML), never in code.
+`EXTRACTION_MODEL`, `temperature`, `max_output_tokens`, `timeout`, `max_retries`, `PROMPT_VERSION` and `ROUTE` all live in config (`pydantic-settings` + experiment YAML), never in code. Defaults since Phase 3: `gpt-5.6-luna`, reasoning effort `low`, single call, prompt `v1`. The D2 comparison model is `gpt-5.6-sol`. Prices live in `dip.extract.pricing` with their source and date.
 
 ### 7.6 Failure handling
 
@@ -574,9 +579,9 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 
 | Metric | Target |
 |---|---|
-| p95 end-to-end, 20-page born-digital PDF | < 90 s |
+| p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). |
 | p95 latency, non-processing endpoints | < 300 ms |
-| Median cost per document | set from the D1/D2 decision, then enforced in CI |
+| Median cost per document | set from the D1/D2 decision, then enforced in CI. Phase 3 measured **$0.0048** (gpt-5.6-luna, single call, CUAD txt, dev). |
 | Job success rate (valid input) | ≥ 99% |
 
 ### 12.2 MCP interface (agent access)
@@ -852,7 +857,8 @@ document_intelligence_pipeline/
 
 - Budget alerts, `max-instances` on every service, and a Cloud Tasks dispatch rate cap.
 - Parse cache + record cache by hash, and prompt caching via the prefix layout.
-- `dip estimate` counts text tokens (`tiktoken`) and estimated image tokens for multimodal routes, multiplied by configured prices. Run it **before every experiment**.
+- `dip estimate` counts text tokens (`tiktoken`) and estimated image tokens for multimodal routes, multiplied by configured prices. Run it **before every experiment**. Output-token constants are fitted to real runs (Phase 3: within 1% for single-call runs).
+- **Spend ledger:** every paid call is appended to `data/runs/<run>/usage.jsonl` as it happens, so crashed runs are still counted. `dip spend` totals it against `DIP_BUDGET_USD`; `predict`/`eval` refuse runs whose estimate exceeds what's left, and stop at the cap mid-run.
 - `dip eval --max-cost-usd X` aborts once spend exceeds the cap.
 - Multimodal experiments run on the 30-doc experiment set only, never on the full corpus, unless the estimate is approved.
 - MCP callers: per-principal rate limits and daily spend caps, checked before enqueueing (§12.2.7). Agent-eval runs have their own `--max-cost-usd`.
@@ -885,6 +891,12 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.7 (2026-10-20), Phase 3:**
+  - D4 decided: single call per contract, with prompt-caching findings (§3.1, §7.1, ADR D4).
+  - Model defaults and pricing (§7.5).
+  - Measured cost and latency (§12.1).
+  - Spend ledger and calibrated estimates (§19).
 
 - **v0.6 (2026-10-20), Phase 2:**
   - Matching rules finalized and implemented: partial dates, cross-unit durations, set matching for jurisdictions and parties, and word-less spans (§10.3).

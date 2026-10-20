@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 2 (eval harness + baselines) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
+Phase 3 (LLM extraction v0) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
 
 ## Quickstart
 
@@ -56,7 +56,15 @@ uv run dip eval --system keyword --split dev              # predict + score + re
 uv run dip report <run_id> --compare <other_run_id>       # re-render, with a comparison
 ```
 
-Runs live in `data/runs/<run_id>/` (predictions, per-field results as Parquet, report). Committed baseline reports: [docs/results/](docs/results/).
+```bash
+uv run dip estimate --system llm --split dev                          # tokens + cost, no API calls
+uv run dip eval --system llm --strategy single --split dev           # needs DIP_OPENAI_API_KEY
+uv run dip spend                                                       # spend so far vs DIP_BUDGET_USD
+```
+
+Runs live in `data/runs/<run_id>/` (predictions, per-field results as Parquet, per-call `usage.jsonl`, report). Committed reports: [docs/results/](docs/results/).
+
+Tracing (optional): `docker compose -f docker/compose.yaml up -d phoenix`, set `DIP_OTEL_ENDPOINT=http://localhost:6006/v1/traces`, then open http://localhost:6006.
 
 ## Configuration
 
