@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 4 (validation & grounding) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
+Phase 5 (prompting & context engineering) complete. Current best on dev: **82.8 micro F1** at $0.006/contract ([report](docs/results/d5-d3/dev-v4-full-reask.md)). See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
 
 ## Quickstart
 
@@ -61,6 +61,9 @@ uv run dip estimate --system llm --split dev                          # tokens +
 uv run dip eval --system llm --strategy single --split dev           # needs DIP_OPENAI_API_KEY
 uv run dip spend                                                       # spend so far vs DIP_BUDGET_USD
 uv run dip validate <run_id> --policy warn --reask                    # ground + check + re-ask failing fields
+uv run dip eval --system llm --split dev --prompt-version v1          # earlier prompt (default: v4)
+uv run dip eval --system llm --split dev --context retrieved          # LlamaIndex retrieval instead of the full contract
+uv run dip build-field-notes                                          # rebuild prompt examples from train
 ```
 
 Runs live in `data/runs/<run_id>/` (predictions, per-field results as Parquet, per-call `usage.jsonl`, report). Committed reports: [docs/results/](docs/results/).

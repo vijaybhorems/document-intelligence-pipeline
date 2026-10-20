@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.8 |
+| **Status** | Draft v0.9 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-20 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -123,9 +123,9 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 |---|---|---|---|---|---|
 | D1 | **Parser / extraction route** | pypdf (text layer only), Docling (layout + OCR), LlamaParse, **multimodal model reading the PDF directly** | §6.4 bake-off on the experiment set: clean PDFs **and** synthetic scans | per-type F1, cost/doc, p95 latency, failure rate | 6 |
 | D2 | **Extraction model** | ≥1 small/cheap and ≥1 large current model (OpenAI). Optionally an Anthropic model. | Same prompts and parser, experiment set | per-type F1, cost/doc, latency | 6 |
-| D3 | **How much context to send** | full document · retrieved sections only · retrieved sections + definitions | §7.4 | recall per type (especially rare clauses), input tokens/doc | 5 |
+| D3 | **How much context to send** | full document · retrieved sections only · retrieved sections + definitions | §7.4 | recall per type (especially rare clauses), input tokens/doc | 5 · **decided: full** ([ADR](adr/D3-context-budget.md)) |
 | D4 | **Field grouping** | 1 call for all 41 fields · ~5 grouped calls · 1 call per field | Experiment set | F1, cost, latency | 3 · **decided: single call** ([ADR](adr/D4-field-grouping.md)) |
-| D5 | **Prompt strategy** | zero-shot definitions · + phrasing variants · + few-shot from train · + defined-terms injection | §7.2–7.3, ablation one step at a time | F1 overall + **non-canonical phrasing recall** (§10.6) | 5 |
+| D5 | **Prompt strategy** | zero-shot definitions · + phrasing variants · + few-shot from train · + defined-terms injection | §7.2–7.3, ablation one step at a time | F1 overall + **non-canonical phrasing recall** (§10.6) | 5 · **decided: v4, all four** ([ADR](adr/D5-prompt-strategy.md)) |
 | D6 | **Where validation goes** | strict schema only · schema + post-hoc validators · post-hoc + re-ask with validation errors | §8.4 | valid-output rate, hallucination rate, precision, extra cost | 4 · **decided: post-hoc + re-ask** ([ADR](adr/D6-validation-placement.md)) |
 | D7 | **Grounding policy** | keep ungrounded values with a warning · drop them | §8.3 | precision vs recall trade-off per type | 4 · **decided: warn** ([ADR](adr/D7-grounding-policy.md)) |
 | D8 | **MCP tool design** | few coarse tools · many fine-grained tools; terse vs detailed tool descriptions | §12.2.6 agent task eval | answer accuracy, citation accuracy, tool calls per task, tokens per task | 9.5 |
@@ -345,7 +345,7 @@ Documents aren't written to a standard. The same field shows up phrased five dif
 ### 7.2 Phrasing variation
 
 - **Learning activity:** for each field, run a DuckDB query that dumps the gold spans from **train**, and read at least 20 of them. Note the different ways the same concept is expressed. For example, Governing Law appears as "governed by the laws of", "construed in accordance with", or "subject to the jurisdiction of". Anti-Assignment may never use the word "assign" at all.
-- Curate 3–6 short `phrasing_variants` per field into the registry and include them in field instructions ("this clause may be phrased as…").
+- Curate 3–6 short `phrasing_variants` per field into the registry and include them in field instructions ("this clause may be phrased as…"). **As built (Phase 5):** `dip build-field-notes` selects up to 3 variants, one positive and one *hard negative* per field from train gold. It keeps only clause-like text, because the shortest CUAD spans are meaningless fragments. The output is committed as `prompts/field_notes.json` for you to review and hand-edit.
 - **Few-shot examples** (prompt variant): 1–2 short positive spans and 1 hard negative per field group, **drawn only from train**. Drawing from dev or test leaks labels into the prompt and inflates your scores.
 - These changes are measured with the **canonical vs non-canonical phrasing slice** (§10.6). The prompt is robust if non-canonical recall approaches canonical recall.
 
@@ -367,6 +367,8 @@ Contracts define their own terms, such as `"Licensed Products" means…` or `ABC
 | Retrieved + definitions | retrieved sections + the defined-terms table |
 
 Retrieval usually cuts tokens sharply but **loses recall on rare, oddly-placed clauses**. Measuring how much recall it loses, per field type, is the lesson here.
+
+**Phase 5 result:** with a single call, retrieval cut LLM input by only 17%, because all 41 fields' chunks together cover much of a typical contract. It cost **3–4 F1** (clause recall 89 → 84). Full context stays ([ADR D3](adr/D3-context-budget.md)). Prompt v4 (all four features) beat v1 by +1.2 F1 on dev ([ADR D5](adr/D5-prompt-strategy.md)). The phrasing gap was *explained* rather than closed: the missed clauses are cases where CUAD's category is broader than its name, so the next lever is fuller definitions, not more variants.
 
 ### 7.5 Model configuration
 
@@ -811,7 +813,7 @@ document_intelligence_pipeline/
 │   ├── ingest/      cuad.py  build_gold.py  splits.py  text_layer.py  synth_scans.py
 │   ├── analytics/   cuad_report.py   # renders analytics/queries/*.sql to Markdown
 │   ├── parse/       base.py  pypdf_parser.py  docling_parser.py  llamaparse_parser.py  text_parser.py  cache.py
-│   ├── extract/     routes.py  extractor.py  grouping.py  context.py (defined terms, glossary)  retrieval.py  prompts/v{N}/
+│   ├── extract/     extractor.py  convert.py  examples.py  context.py (defined terms)  retrieval.py  estimate.py  pricing.py  prompts/v{N}/  prompts/field_notes.json
 │   ├── validate/    normalize.py  grounding.py  rules.py  validator.py
 │   ├── pipeline.py
 │   ├── store/       gcs.py  jobs.py  lake.py
@@ -898,6 +900,11 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.9 (2026-10-20), Phase 5:**
+  - D5 decided: prompt v4 (variants + examples with hard negatives + defined terms).
+  - D3 decided: full context, with retrieval kept for long inputs.
+  - Phrasing gap explained by category breadth.
 
 - **v0.8 (2026-10-20), Phase 4:**
   - D6 decided: post-hoc validation + re-ask. D7 decided: warn.
