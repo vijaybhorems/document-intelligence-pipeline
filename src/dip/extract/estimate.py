@@ -17,9 +17,11 @@ from dip.extract.pricing import price_of
 from dip.schema.llm import output_model
 from dip.schema.registry import FIELDS
 
-# Calibrated on the Phase 3 smoke runs (gpt-5.6-luna, effort=low); see docs/notes/phase-3.md.
-OUTPUT_TOKENS_PER_CALL = 400
-OUTPUT_TOKENS_PER_FIELD = 150
+# Fitted to the Phase 3 D4 runs (gpt-5.6-luna, effort=low, experiment set): single
+# ~2,000/call, grouped ~790, per_field ~435. See docs/notes/phase-3.md.
+OUTPUT_TOKENS_PER_CALL = 250
+OUTPUT_TOKENS_PER_FIELD = 45
+OUTPUT_TOKENS_PER_NULL_FIELD = 4  # shared schema: `"field": null` for fields outside the call
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,10 @@ def estimate(extractor: OpenAIExtractor, texts: dict[str, str]) -> Estimate:
         else [_tokens(json.dumps(output_model("x", s).model_json_schema())) for _, s in plan]
     )
     output_per_contract = sum(
-        OUTPUT_TOKENS_PER_CALL + OUTPUT_TOKENS_PER_FIELD * len(specs) for _, specs in plan
+        OUTPUT_TOKENS_PER_CALL
+        + OUTPUT_TOKENS_PER_FIELD * len(specs)
+        + (OUTPUT_TOKENS_PER_NULL_FIELD * (len(FIELDS) - len(specs)) if shared else 0)
+        for _, specs in plan
     )
 
     input_tokens = cacheable = 0

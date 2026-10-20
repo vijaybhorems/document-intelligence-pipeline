@@ -1,0 +1,14 @@
+# Local observability. Start with:  docker compose -f docker/compose.yaml up -d phoenix
+# Then set DIP_OTEL_ENDPOINT=http://localhost:6006/v1/traces and open http://localhost:6006
+services:
+  phoenix:
+    image: arizephoenix/phoenix:version-20.23.0-nonroot
+    ports:
+      - "127.0.0.1:6006:6006"  # UI + OTLP/HTTP; bound to localhost only
+    volumes:
+      - phoenix-data:/mnt/data
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+
+volumes:
+  phoenix-data:

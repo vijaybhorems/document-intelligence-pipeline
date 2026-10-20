@@ -345,3 +345,30 @@ def test_spend_ledger_survives_a_run_without_run_json(tmp_path: Path) -> None:
     )
 
     assert spent_usd(tmp_path / "runs") == pytest.approx(0.75)
+
+
+def test_contract_span_records_cost_and_strategy() -> None:
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from dip.observability import tracing
+
+    exporter = InMemorySpanExporter()
+    provider = tracing.configure_tracing(None, exporter=exporter)
+    assert provider is not None
+    try:
+        _extractor(FakeResponses(ANSWERS)).predict_all({"d1": TEXT})
+        provider.force_flush()
+        (span,) = [s for s in exporter.get_finished_spans() if s.name == "extract.contract"]
+    finally:
+        tracing.shutdown_tracing()
+
+    assert span.attributes is not None
+    assert span.attributes["dip.strategy"] == "grouped"
+    assert span.attributes["dip.calls"] == 6
+    assert span.attributes["dip.cost_usd"] == pytest.approx(cost_usd(MODEL, 6000, 4000, 600))
+
+
+def test_tracing_is_off_without_an_endpoint() -> None:
+    from dip.observability.tracing import configure_tracing
+
+    assert configure_tracing(None) is None

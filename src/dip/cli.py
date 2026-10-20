@@ -189,6 +189,14 @@ def _make_system(
     )
 
 
+def _start_tracing() -> None:
+    from dip.observability.tracing import configure_tracing
+
+    settings = get_settings()
+    if configure_tracing(settings.otel_endpoint, settings.trace_content):
+        typer.echo(f"tracing to {settings.otel_endpoint}")
+
+
 def _budget_check(system: object, split: str, max_cost: float | None) -> float | None:
     """Print the estimate and remaining budget; refuse runs that can't fit. Returns the run cap."""
     from dip.eval.runs import spent_usd, split_texts
@@ -254,7 +262,13 @@ def predict(
 
     built = _make_system(system, model, strategy, effort, own_schema)
     cap = _budget_check(built, split, max_cost_usd)
-    run_dir = run_predict(built, split, get_settings().data_dir, _paths()["runs"], cap)
+    from dip.observability.tracing import shutdown_tracing
+
+    _start_tracing()
+    try:
+        run_dir = run_predict(built, split, get_settings().data_dir, _paths()["runs"], cap)
+    finally:
+        shutdown_tracing()
     meta = load_meta(run_dir)
     typer.echo(
         f"run: {run_dir.name}  ({meta.n_predicted}/{meta.n_docs} contracts, "
@@ -315,7 +329,13 @@ def eval_cmd(
 
     built = _make_system(system, model, strategy, effort, own_schema)
     cap = _budget_check(built, split, max_cost_usd)
-    run_dir = run_predict(built, split, get_settings().data_dir, _paths()["runs"], cap)
+    from dip.observability.tracing import shutdown_tracing
+
+    _start_tracing()
+    try:
+        run_dir = run_predict(built, split, get_settings().data_dir, _paths()["runs"], cap)
+    finally:
+        shutdown_tracing()
     typer.echo(f"run: {run_dir.name}")
     score(run_dir.name)
     report(run_dir.name, compare=compare, out=out)

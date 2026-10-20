@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Total spend allowed across all eval runs recorded in data/runs (SPEC §19).
     budget_usd: float = 10.0
 
+    # Tracing (SPEC §11). Unset = off. Local Phoenix: http://localhost:6006/v1/traces
+    otel_endpoint: str | None = None
+    trace_content: bool = True  # include prompt/response text in spans
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -21,6 +21,7 @@ from typing import Any, cast
 import openai
 from openai import AsyncOpenAI
 from openai.types.shared_params import Reasoning
+from opentelemetry import trace
 from pydantic import BaseModel
 
 from dip.extract import prompts
@@ -31,6 +32,7 @@ from dip.schema.llm import LLMField, output_model
 from dip.schema.registry import FIELDS, FieldGroup, FieldSpec
 
 MAX_OUTPUT_TOKENS_BASE = 4_000
+_tracer = trace.get_tracer("dip.extract")
 MAX_OUTPUT_TOKENS_PER_FIELD = 800
 MAX_OUTPUT_TOKENS_CAP = 32_000
 
@@ -157,6 +159,27 @@ class OpenAIExtractor:
     # ── One contract ─────────────────────────────────────────────────────────
 
     async def _predict_one(
+        self, client: AsyncOpenAI, calls: asyncio.Semaphore, budget: _Budget, text: str
+    ) -> SystemOutput:
+        with _tracer.start_as_current_span("extract.contract") as span:
+            span.set_attributes(
+                {
+                    "dip.model": self.model,
+                    "dip.strategy": self.strategy.value,
+                    "dip.chars": len(text),
+                }
+            )
+            output = await self._predict_one_untraced(client, calls, budget, text)
+            span.set_attributes(
+                {
+                    "dip.cost_usd": output.usage.cost_usd,
+                    "dip.calls": output.usage.calls,
+                    "dip.issues": len(output.issues),
+                }
+            )
+            return output
+
+    async def _predict_one_untraced(
         self, client: AsyncOpenAI, calls: asyncio.Semaphore, budget: _Budget, text: str
     ) -> SystemOutput:
         started = time.perf_counter()
