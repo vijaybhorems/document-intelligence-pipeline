@@ -15,6 +15,7 @@ from dip.eval.scorer import (
     slice_recall,
 )
 from dip.eval.slices import Slice
+from dip.eval.validation_metrics import ValidationMetrics
 from dip.schema.registry import FIELDS, FIELDS_BY_NAME, FieldType
 
 GroupOf = Callable[[str], str | None]
@@ -84,6 +85,7 @@ def render(
     meta: RunMeta,
     results: list[FieldResult],
     baseline: tuple[RunMeta, list[FieldResult]] | None = None,
+    validation: ValidationMetrics | None = None,
 ) -> str:
     type_order = [t.value for t in FieldType]
     family_order = sorted({g for f in FIELDS if (g := _by_family(f.name))})
@@ -97,14 +99,16 @@ def render(
         f"# Eval report: `{meta.run_id}`",
         "",
         _table(
-            ["system", "split", "contracts", "git", "created (UTC)"],
+            ["system", "split", "contracts", "git", "created (UTC)", "cost/contract", "p50 / p95"],
             [
                 [
                     meta.system,
                     meta.split,
-                    str(meta.n_docs),
+                    f"{meta.n_predicted}/{meta.n_docs}",
                     f"`{meta.git_sha}`{' (dirty)' if meta.git_dirty else ''}",
                     f"{meta.created_at:%Y-%m-%d %H:%M}",
+                    _cost(meta),
+                    f"{meta.latency_p50_s:.1f}s / {meta.latency_p95_s:.1f}s",
                 ]
             ],
         ),
@@ -145,6 +149,8 @@ def render(
         "",
         _slice_table(results),
     ]
+    if validation is not None:
+        parts += ["", *_validation_section(validation)]
     if baseline:
         parts += ["", *_comparison(results, *baseline)]
     return "\n".join(parts) + "\n"
@@ -265,4 +271,53 @@ def _comparison(
         "Biggest movers (headline F1):",
         "",
         _table(["field", "before", "after", "Δ"], field_rows),
+    ]
+
+
+def _cost(meta: RunMeta) -> str:
+    if not meta.n_docs:
+        return "-"
+    base = float(meta.config.get("base_cost_usd", 0.0)) if meta.derived_from else 0.0
+    total = (base + meta.usage.cost_usd) / meta.n_docs
+    extra = (
+        f" (incl. ${meta.usage.cost_usd / meta.n_docs:.4f} re-ask)"
+        if meta.usage.cost_usd and meta.derived_from
+        else ""
+    )
+    return f"${total:.4f}{extra}"
+
+
+def _validation_section(v: ValidationMetrics) -> list[str]:
+    fp_real = v.false_positives - v.false_positives_ungrounded
+    rows = [
+        [
+            "valid outputs (no L1/L2 issue)",
+            f"{v.contracts_valid}/{v.contracts}",
+            _pct(v.valid_output_rate),
+        ],
+        ["quotes found in the contract", f"{v.quotes_grounded}/{v.quotes}", _pct(v.grounding_rate)],
+        [
+            "values with no grounded evidence",
+            f"{v.values_unsupported}/{v.values}",
+            _pct(v.unsupported_rate),
+        ],
+        [
+            "false positives, ungrounded (**hallucinated**)",
+            f"{v.false_positives_ungrounded}/{v.false_positives}",
+            _pct(v.hallucination_rate),
+        ],
+        ["false positives, grounded (over-triggers)", f"{fp_real}/{v.false_positives}", ""],
+        ["correct fields whose quote wasn't found", str(v.true_positives_ungrounded), ""],
+    ]
+    codes = ", ".join(f"`{code}` {n}" for code, n in v.issues_by_code.items()) or "none recorded"
+    return [
+        "## Validation",
+        "",
+        "Grounding locates every predicted quote in the contract (SPEC §8.3). A false positive "
+        "with no grounded quote is a hallucination; one backed by real text is an over-trigger "
+        "(wrong legal reading). They need different fixes.",
+        "",
+        _table(["", "count", "%"], rows),
+        "",
+        f"Validation issues: {codes}.",
     ]
