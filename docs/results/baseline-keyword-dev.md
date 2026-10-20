@@ -1,8 +1,8 @@
-# Eval report: `20261020-203050-keyword-dev`
+# Eval report: `20261020-203205-keyword-dev`
 
 | system | split | contracts | git | created (UTC) |
 |---|---|---|---|---|
-| keyword | dev | 80 | `0da8917` | 2026-10-20 20:30 |
+| keyword | dev | 80 | `4b3c312` (dirty) | 2026-10-20 20:32 |
 
 Percentages. **Headline metric**: presence for clauses, value for typed fields. Micro pools TP/FP/FN across fields; macro averages per-field F1, so rare fields count equally. CIs: 1,000 bootstrap resamples of contracts.
 
@@ -135,7 +135,7 @@ Canonical = gold text contains the field's obvious wording (`canonical_cues` in 
 | `warranty_duration` | 100.0 | 9 | 100.0 | 3 | +0.0 |
 | **all** | 86.1 | 632 | 57.3 | 213 | +28.8 |
 
-## Compared with `20261020-203039-all_absent-dev` (all_absent)
+## Compared with `20261020-203153-all_absent-dev` (all_absent)
 
 | field type | before F1 | after F1 | Δ |
 |---|---|---|---|

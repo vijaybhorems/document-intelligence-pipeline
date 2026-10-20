@@ -1,8 +1,8 @@
-# Eval report: `20261020-203039-all_absent-dev`
+# Eval report: `20261020-203153-all_absent-dev`
 
 | system | split | contracts | git | created (UTC) |
 |---|---|---|---|---|
-| all_absent | dev | 80 | `0da8917` | 2026-10-20 20:30 |
+| all_absent | dev | 80 | `4b3c312` | 2026-10-20 20:31 |
 
 Percentages. **Headline metric**: presence for clauses, value for typed fields. Micro pools TP/FP/FN across fields; macro averages per-field F1, so rare fields count equally. CIs: 1,000 bootstrap resamples of contracts.
 
