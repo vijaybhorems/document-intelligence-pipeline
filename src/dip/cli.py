@@ -9,6 +9,7 @@ from dip import __version__
 from dip.config import get_settings
 
 if TYPE_CHECKING:
+    from dip.extract.retrieval import Retriever
     from dip.extract.system import System
 
 app = typer.Typer(help="Document intelligence pipeline.", no_args_is_help=True)
@@ -155,6 +156,7 @@ SplitOpt = Annotated[str, typer.Option(callback=_check_split)]
 PromptOpt = Annotated[
     str | None, typer.Option("--prompt-version", help="v1 | v2 | v3 | v4 (decision D5).")
 ]
+ContextOpt = Annotated[str, typer.Option("--context", help="full | retrieved (decision D3).")]
 OwnSchemaOpt = Annotated[
     bool,
     typer.Option(
@@ -173,6 +175,7 @@ def _make_system(
     effort: str | None,
     own_schema: bool = False,
     prompt_version: str | None = None,
+    context: str = "full",
 ) -> "System":
     from dip.eval.baselines import SYSTEMS
     from dip.extract import prompts
@@ -195,10 +198,21 @@ def _make_system(
         reasoning_effort=effort or settings.reasoning_effort,
         shared_schema=not own_schema,
         prompt_version=prompt_version or prompts.CURRENT_VERSION,
+        retriever=_retriever(context, settings.openai_api_key.get_secret_value()),
         max_concurrency=settings.max_concurrency,
         timeout_s=settings.request_timeout_s,
         api_key=settings.openai_api_key.get_secret_value(),
     )
+
+
+def _retriever(context: str, api_key: str) -> "Retriever | None":
+    if context not in ("full", "retrieved"):
+        raise typer.BadParameter("--context must be full or retrieved")
+    if context == "full":
+        return None
+    from dip.extract.retrieval import openai_retriever
+
+    return openai_retriever(api_key)
 
 
 def _start_tracing() -> None:
@@ -241,10 +255,11 @@ def estimate(
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
+    context: ContextOpt = "full",
 ) -> None:
     """Estimate a run's tokens and cost without calling the API."""
     _budget_check(
-        _make_system(system, model, strategy, effort, own_schema, prompt_version),
+        _make_system(system, model, strategy, effort, own_schema, prompt_version, context),
         split,
         max_cost=None,
     )
@@ -272,13 +287,14 @@ def predict(
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
+    context: ContextOpt = "full",
     max_cost_usd: MaxCostOpt = None,
 ) -> None:
     """Run a system over a split and save its predictions as a new run."""
     from dip.eval.runs import load_meta
     from dip.eval.runs import predict as run_predict
 
-    built = _make_system(system, model, strategy, effort, own_schema, prompt_version)
+    built = _make_system(system, model, strategy, effort, own_schema, prompt_version, context)
     cap = _budget_check(built, split, max_cost_usd)
     from dip.observability.tracing import shutdown_tracing
 
@@ -347,6 +363,7 @@ def eval_cmd(
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
+    context: ContextOpt = "full",
     max_cost_usd: MaxCostOpt = None,
     compare: Annotated[str | None, typer.Option(help="run_id to compare against.")] = None,
     out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
@@ -354,7 +371,7 @@ def eval_cmd(
     """predict + score + report in one go."""
     from dip.eval.runs import predict as run_predict
 
-    built = _make_system(system, model, strategy, effort, own_schema, prompt_version)
+    built = _make_system(system, model, strategy, effort, own_schema, prompt_version, context)
     cap = _budget_check(built, split, max_cost_usd)
     from dip.observability.tracing import shutdown_tracing
 

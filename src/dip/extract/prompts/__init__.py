@@ -56,9 +56,22 @@ def contract_message(text: str) -> str:
     return f"<contract>\n{text}\n</contract>"
 
 
-def context_messages(text: str, version: str = CURRENT_VERSION) -> list[str]:
-    """User messages carrying the contract (and, from v4, its defined terms)."""
-    messages = [contract_message(text)]
+def excerpts_message(excerpts: str) -> str:
+    return (
+        "These are the parts of the contract most relevant to the fields below; "
+        "the rest is omitted and marked [...].\n"
+        f"<contract_excerpts>\n{excerpts}\n</contract_excerpts>"
+    )
+
+
+def context_messages(
+    text: str, version: str = CURRENT_VERSION, excerpts: str | None = None
+) -> list[str]:
+    """User messages carrying the contract (or excerpts of it) and, from v4, its defined terms.
+
+    Defined terms always come from the full text, so they survive retrieval (decision D3).
+    """
+    messages = [contract_message(text) if excerpts is None else excerpts_message(excerpts)]
     if "defined_terms" in FEATURES[version]:
         from dip.extract.context import defined_terms_message
 
