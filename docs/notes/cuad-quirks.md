@@ -33,6 +33,7 @@ What we found reconciling CUAD v1's four sources (Phase 1, 2026-10-19), and how 
 | Governing law: about 78 spellings for 57 jurisdictions | `England; Wales`, `England and Wales, UK`, `Province of Ontario, Canada`, `British Columbia,Canada`, `Massachussets` | Alias table with longest match first and word boundaries (`Arkansas` ≠ `Kansas`). Country qualifiers are dropped when a sub-jurisdiction is present. |
 | Governing law that isn't a place | `the state in which the breach occurs`, `[* * *]` (redacted), `United Nations Convention on … Sale of Goods` | `unparsed_answer`, plus any place it does name |
 | Parties answers mix names, defined terms and boilerplate | `Ingram Micro ("Distributor")`, `ALPS Distributors, Inc. (the “Distributor”)`, `WATER NOW, INC.; ("Water Now")`, `Hydraspin and Distributor ("Party", "Parties")` | `Party(name, aliases)`. Alias-only segments attach to the previous party. Entries whose only aliases are "Party"/"Parties" are dropped. |
+| Redacted values labelled as spans | `[*]`, `[●]`, `[•]` as a Parties or Agreement Date span (8 spans); a lone `.` (2 spans) | Kept. Span matching compares word-less spans verbatim, so gold still matches itself (oracle test). |
 | Unsigned templates | SPORT-HALEY: party `__________`, date `19__` | Kept as labelled. These are correct labels for a template. |
 
 ## Disagreements between the label sources (202 issues across 136 contracts)

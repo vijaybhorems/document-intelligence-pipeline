@@ -182,6 +182,8 @@ def test_token_jaccard() -> None:
         "The Licensee shall not assign", "licensee shall not assign"
     ) == pytest.approx(0.8)
     assert matchers.token_jaccard("", "") == 0.0
+    assert matchers.token_jaccard("[\u25cf]", "[\u25cf]") == 1.0  # redaction mark, no words
+    assert matchers.token_jaccard(".", "[*]") == 0.0
 
 
 def test_spans_match_by_jaccard_threshold() -> None:

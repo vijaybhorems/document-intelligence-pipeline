@@ -259,7 +259,10 @@ def _tokens(text: str) -> set[str]:
 
 def token_jaccard(a: str, b: str) -> float:
     ta, tb = _tokens(a), _tokens(b)
-    return len(ta & tb) / len(ta | tb) if ta | tb else 0.0
+    if not ta and not tb:
+        # Spans with no words, e.g. redaction marks like "[●]": compare them verbatim.
+        return 1.0 if a.strip() and a.strip() == b.strip() else 0.0
+    return len(ta & tb) / len(ta | tb)
 
 
 def spans(pred: ClauseField, gold: ClauseField) -> Counts:
