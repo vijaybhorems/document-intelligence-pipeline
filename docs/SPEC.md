@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.5 |
+| **Status** | Draft v0.6 |
 | **Owner** | Vijay |
-| **Last updated** | 2026-10-19 |
+| **Last updated** | 2026-10-20 |
 | **Target platform** | Google Cloud (Cloud Run) |
 
 ---
@@ -463,17 +463,19 @@ gs://{project}-dip-{env}/
 
 ### 10.3 Matching rules per field type
 
+Implemented in `dip.eval.matchers` (Phase 2). Every field gets a **presence** score; typed fields also get a **value** score and clauses a **span** score.
+
 | Field type | Match rule | Counting |
 |---|---|---|
-| `clause` (presence) | pred `present` vs gold has ≥1 span | TP both present. FP pred only. FN gold only. TN neither. |
-| `clause` (span, strict) | each gold span matched to a predicted quote by **token Jaccard ≥ 0.5** (CUAD convention), greedy bipartite matching | unmatched preds are FP, unmatched gold are FN |
-| `date` | equality on the components gold knows (a year-only gold date matches any prediction in that year; to be confirmed in Phase 2). Any gold value in a multi-valued answer counts. | correct = TP. **Wrong value = FP + FN.** Missed = FN. Spurious = FP. |
-| `duration` | equal after converting to days (documented convention: month = 30, year = 365) | as date |
-| `jurisdiction` | canonical equality | as date |
-| `entity_list` | fuzzy ratio ≥ 90 on normalized names | set matching |
-| `text` | fuzzy ratio ≥ 85 | as date |
+| any (presence) | pred has a value or evidence vs gold has a value or a span | TP both present. FP pred only. FN gold only. TN neither. |
+| `clause` (span, strict) | each gold span matched to a predicted quote by **token Jaccard ≥ 0.5** (CUAD convention), greedy one-to-one, best pairs first. Spans with no words (redaction marks like `[●]`) compare verbatim. | unmatched preds are FP, unmatched gold are FN |
+| `date` | equal on **every component gold knows**: a year-only gold date (`[]/[]/2020`) matches any predicted date in 2020, but a year-only prediction doesn't match a full gold date. `perpetual` matches `perpetual`. | **single answer**: TP if any predicted value matches any gold value (CUAD's multi-valued dates are alternatives). **Wrong value = FP + FN.** Missed = FN. Spurious = FP. |
+| `duration` | same length within **2%** across units (month = 365.25/12 days, year = 365.25 days), so `6 months` = `180 days` and `12 months` = `1 year`. `successive`/`count` are ignored. | single answer, as date |
+| `jurisdiction` | equality after canonicalizing both sides with the Phase 1 normalizer | **set**: one-to-one matching; each value is its own TP/FP/FN |
+| `entity_list` | fuzzy ratio ≥ 90 on names normalized for case, punctuation and legal suffixes (`NETGEAR, Inc.` = `Netgear Inc`) | set, as jurisdiction |
+| `text` | fuzzy ratio ≥ 85 on normalized text | single answer, as date |
 
-Write a unit test for the "wrong value = FP + FN" case.
+Unit tests cover the "wrong value = FP + FN" case. An **oracle test** scores gold against itself over all 510 contracts and must be perfect on every field and metric. It caught a real matcher bug in Phase 2.
 
 **Typed fields are scored twice** (a Phase 1 finding). *Presence* asks whether the model found the relevant text. *Value* asks whether the normalized value is right. CUAD has 160 typed labels where the text is marked but no value can be derived, such as an expiration clause tied to an event rather than a date. These count for presence and are excluded from value scoring. So are the 26 gold answers marked `unparsed_answer`.
 
@@ -500,7 +502,9 @@ Write a unit test for the "wrong value = FP + FN" case.
 
 ### 10.6 Phrasing robustness slice
 
-For each clause or typed field, mark each gold span **canonical** if it contains one of the registry's `canonical_cues`, and **non-canonical** otherwise. Report recall on both slices. The gap measures whether your prompt survives real-world phrasing, and it's the metric that justifies the prompt work in §7.2 and §7.3.
+For each field with cues, a gold-present (contract, field) is **canonical** if any gold span contains one of the registry's `canonical_cues` (matched as word prefixes), and **non-canonical** otherwise. Report presence recall on both slices. The gap measures whether your prompt survives real-world phrasing, and it's the metric that justifies the prompt work in §7.2 and §7.3.
+
+Cues were tuned on **train only**. Parties and agreement/effective dates have none, because their spans are names or date strings, not phrasing.
 
 ### 10.7 Error attribution
 
@@ -525,8 +529,13 @@ Then write **"why these categories are hard"** in `docs/results.md`. Look for pa
 
 ### 10.9 Baselines (Phase 2)
 
-1. **All-absent**: everything null or false. This gives the recall floor and shows how imbalanced each field is.
+1. **All-absent**: everything null or false. This gives the recall floor and shows how imbalanced each field is. It scores 0 F1 everywhere, yet would be **78% "accurate"** on clause presence on dev. That's why this spec uses precision and recall rather than accuracy.
 2. **Regex/keyword**: canonical cues + date regexes. The LLM must beat it, and per field it's often surprisingly competitive.
+
+**Dev results** ([`docs/results/baseline-keyword-dev.md`](results/baseline-keyword-dev.md)): headline micro F1 **55.8** (95% CI 52–59), macro 53.0.
+- Clauses: P 39.6 / R 91.1, so it finds almost everything but over-triggers.
+- Expiration date value F1: 14.0. These dates are mostly computed, not written in the text.
+- Phrasing slice: canonical recall 86.1 vs non-canonical 57.3, a gap of 28.8 points.
 
 ### 10.10 Gold-label builder
 
@@ -857,7 +866,7 @@ document_intelligence_pipeline/
 3. Is a hybrid router (text-layer coverage → route) worth its complexity? It depends on the D1 results.
 4. Firestore vs GCS status objects (I4) at your scale?
 5. Keep DOCX in v1?
-6. Partial gold dates: should a year-only gold date (`[]/[]/2020`) match a full predicted date in that year, or be excluded from value scoring? Decide in Phase 2 and record it.
+6. ~~Partial gold dates~~ **Decided in Phase 2:** match on the components gold knows (§10.3).
 7. MCP: do your target clients support MCP's long-running task features yet, or is polling enough? And do they all accept a pre-registered OAuth client ID, or will you need the OAuth proxy fallback (ADR I8)? (The authorization server is decided: Google OAuth.)
 8. Will more than one organization ever connect via MCP? If so, add `owner_id` scoping before exposing `search_records`.
 
@@ -876,6 +885,13 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.6 (2026-10-20), Phase 2:**
+  - Matching rules finalized and implemented: partial dates, cross-unit durations, set matching for jurisdictions and parties, and word-less spans (§10.3).
+  - Oracle test added (§10.3).
+  - Cue rules for the phrasing slice (§10.6).
+  - Dev baseline results (§10.9).
+  - Open question 6 resolved.
 
 - **v0.5 (2026-10-19), Phase 1 findings:**
   - Warranty Duration reclassified as a clause (33 clauses + 8 typed fields).

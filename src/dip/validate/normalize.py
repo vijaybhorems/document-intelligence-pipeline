@@ -331,3 +331,69 @@ def parse_cuad_parties(text: str | None) -> ParsedParties:
         else:
             result.unparsed.append(part)
     return result
+
+
+# ── Dates in free text ───────────────────────────────────────────────────────
+
+_MONTHS = {
+    name: number
+    for number, names in enumerate(
+        [
+            ("january", "jan"), ("february", "feb"), ("march", "mar"), ("april", "apr"),
+            ("may",), ("june", "jun"), ("july", "jul"), ("august", "aug"),
+            ("september", "sept", "sep"), ("october", "oct"), ("november", "nov"),
+            ("december", "dec"),
+        ],
+        start=1,
+    )
+    for name in names
+}  # fmt: skip
+_MONTH = "|".join(sorted(_MONTHS, key=len, reverse=True))
+_TEXT_DATES = (
+    # May 8, 2014 · Sept. 1st 2006
+    re.compile(
+        rf"\b(?P<month>{_MONTH})\.?\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?,?\s+(?P<year>\d{{4}})\b",
+        re.I,
+    ),
+    # 8 May 2014 · 8th day of May, 2014
+    re.compile(
+        rf"\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?:day\s+of\s+)?(?P<month>{_MONTH})\.?,?\s+"
+        r"(?P<year>\d{4})\b",
+        re.I,
+    ),
+    # 2014-05-08 (ISO, what the LLM schema asks for)
+    re.compile(r"\b(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\b"),
+    # 5/8/2014 · 5/8/14 (US order)
+    re.compile(r"\b(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<year>\d{4}|\d{2})\b"),
+)  # fmt: skip
+
+
+@dataclass(frozen=True)
+class FoundDate:
+    value: PartialDate
+    start: int
+    end: int
+
+
+def find_dates(text: str) -> list[FoundDate]:
+    """Every unambiguous full date in ``text``, in order of appearance."""
+    found: dict[int, FoundDate] = {}
+    for pattern in _TEXT_DATES:
+        for m in pattern.finditer(text):
+            if any(f.start <= m.start() < f.end for f in found.values()):
+                continue
+            month_text = m["month"].lower()
+            month = _MONTHS[month_text] if month_text in _MONTHS else int(month_text)
+            year = _year(m["year"])
+            try:
+                value = PartialDate(year=year, month=month, day=int(m["day"]))
+            except ValueError:
+                continue
+            found[m.start()] = FoundDate(value, m.start(), m.end())
+    return [found[k] for k in sorted(found)]
+
+
+def parse_date_text(text: str | None) -> PartialDate | None:
+    """The first full date in ``text``, e.g. ``"May 8, 2014"`` or ``"2014-05-08"``."""
+    dates = find_dates(text or "")
+    return dates[0].value if dates else None

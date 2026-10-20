@@ -19,6 +19,7 @@ def _paths() -> dict[str, Path]:
         "gold": data / "gold",
         "profiles": data / "profiles",
         "splits": data / "splits.json",
+        "runs": data / "runs",
     }
 
 
@@ -119,6 +120,91 @@ def cuad_report(
 
     out.write_text(render(get_settings().data_dir), encoding="utf-8")
     typer.echo(f"Wrote {out}")
+
+
+# ── Phase 2: evaluation ──────────────────────────────────────────────────────
+
+SPLITS = ("smoke", "experiment", "dev", "test", "train")
+
+
+def _check_split(split: str) -> str:
+    if split not in SPLITS:
+        raise typer.BadParameter(f"choose one of {', '.join(SPLITS)}")
+    if split == "test":
+        typer.echo("Scoring on TEST. Do this only at milestones (SPEC §2.3).", err=True)
+    return split
+
+
+def _run_dir(run_id: str) -> Path:
+    run_dir = _paths()["runs"] / run_id
+    if not (run_dir / "run.json").exists():
+        raise typer.BadParameter(f"no run {run_id!r} in {_paths()['runs']}")
+    return run_dir
+
+
+@app.command()
+def predict(
+    system: Annotated[str, typer.Option(help="all_absent | keyword")],
+    split: Annotated[str, typer.Option(callback=_check_split)] = "dev",
+) -> None:
+    """Run a system over a split and save its predictions as a new run."""
+    from dip.eval.baselines import SYSTEMS
+    from dip.eval.runs import predict as run_predict
+
+    if system not in SYSTEMS:
+        raise typer.BadParameter(f"unknown system {system!r}; choose from {sorted(SYSTEMS)}")
+    run_dir = run_predict(SYSTEMS[system], split, get_settings().data_dir, _paths()["runs"])
+    typer.echo(run_dir.name)
+
+
+@app.command()
+def score(run_id: str) -> None:
+    """Score a run's predictions against gold (writes field_results.parquet)."""
+    from dip.eval.runs import dump_summary, score_run
+
+    results = score_run(_run_dir(run_id), get_settings().data_dir)
+    typer.echo(f"headline micro F1 by field type:\n{dump_summary(results)}")
+
+
+@app.command()
+def report(
+    run_id: str,
+    compare: Annotated[str | None, typer.Option(help="Another run_id to compare against.")] = None,
+    out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
+) -> None:
+    """Render a run's Markdown report (data/runs/<run_id>/report.md)."""
+    from dip.eval.report import render
+    from dip.eval.runs import load_meta, load_results
+
+    run_dir = _run_dir(run_id)
+    baseline = None
+    if compare:
+        other = _run_dir(compare)
+        baseline = (load_meta(other), load_results(other))
+    text = render(load_meta(run_dir), load_results(run_dir), baseline)
+    (run_dir / "report.md").write_text(text, encoding="utf-8")
+    if out:
+        out.write_text(text, encoding="utf-8")
+    typer.echo(f"Wrote {run_dir / 'report.md'}" + (f" and {out}" if out else ""))
+
+
+@app.command("eval")
+def eval_cmd(
+    system: Annotated[str, typer.Option(help="all_absent | keyword")],
+    split: Annotated[str, typer.Option(callback=_check_split)] = "dev",
+    compare: Annotated[str | None, typer.Option(help="run_id to compare against.")] = None,
+    out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
+) -> None:
+    """predict + score + report in one go."""
+    from dip.eval.baselines import SYSTEMS
+    from dip.eval.runs import predict as run_predict
+
+    if system not in SYSTEMS:
+        raise typer.BadParameter(f"unknown system {system!r}; choose from {sorted(SYSTEMS)}")
+    run_dir = run_predict(SYSTEMS[system], split, get_settings().data_dir, _paths()["runs"])
+    typer.echo(f"run: {run_dir.name}")
+    score(run_dir.name)
+    report(run_dir.name, compare=compare, out=out)
 
 
 if __name__ == "__main__":

@@ -193,3 +193,37 @@ class GoldRecord(_Model):
     text_chars: int
     fields: ContractFields
     label_issues: list[LabelIssue] = []
+
+
+# ── Presence and value, shared by the gold builder and the eval ──────────────
+
+FieldValue = (
+    TextField | PartyListField | DateField | DurationField | JurisdictionField | ClauseField
+)
+
+
+def has_value(field: FieldValue) -> bool:
+    """Does the field carry a usable value (not just evidence)?"""
+    match field:
+        case ClauseField():
+            return field.present
+        case TextField():
+            return bool(field.value and field.value.strip())
+        case PartyListField():
+            return bool(field.parties)
+        case DateField() | DurationField():
+            return bool(field.values) or field.perpetual
+        case JurisdictionField():
+            return bool(field.values)
+
+
+def is_present(field: FieldValue) -> bool:
+    """Was the field found at all: a value, or evidence pointing at the relevant text?"""
+    return has_value(field) or bool(field.evidence)
+
+
+def field_of(fields: ContractFields, name: str) -> FieldValue:
+    """Look up a field by registry name, whether it's typed or a clause."""
+    if name in ContractFields.model_fields:
+        return getattr(fields, name)
+    return getattr(fields.clauses, name)

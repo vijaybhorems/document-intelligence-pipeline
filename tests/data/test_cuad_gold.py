@@ -109,3 +109,16 @@ def test_committed_splits_cover_the_corpus_once(index: dict[str, CuadDocument]) 
     assert sorted(main) == sorted(index)
     assert set(splits["experiment"]) <= set(splits["dev"])
     assert set(splits["smoke"]) <= set(splits["experiment"])
+
+
+def test_gold_scored_against_itself_is_perfect(index: dict[str, CuadDocument]) -> None:
+    """Oracle check: any matcher that can't reproduce 100% on gold vs gold has a bug."""
+    from dip.eval.scorer import Metric, per_field, score
+
+    gold = {doc_id: gold_record(doc).fields for doc_id, doc in index.items()}
+    results = score(gold, gold)
+
+    for metric in Metric:
+        for field, counts in per_field(results, metric).items():
+            assert counts.fp == 0, (metric, field, counts)
+            assert counts.fn == 0, (metric, field, counts)

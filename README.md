@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 1 (data & gold labels) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
+Phase 2 (eval harness + baselines) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
 
 ## Quickstart
 
@@ -48,6 +48,15 @@ uv run dip cuad-report     # regenerates docs/notes/cuad-dataset-profile.md
 ```
 
 `data/splits.json` is committed and frozen. `dip make-splits` won't overwrite it without `--force`. Findings: [CUAD quirks](docs/notes/cuad-quirks.md), [dataset profile](docs/notes/cuad-dataset-profile.md).
+
+## Evaluation (Phase 2)
+
+```bash
+uv run dip eval --system keyword --split dev              # predict + score + report
+uv run dip report <run_id> --compare <other_run_id>       # re-render, with a comparison
+```
+
+Runs live in `data/runs/<run_id>/` (predictions, per-field results as Parquet, report). Committed baseline reports: [docs/results/](docs/results/).
 
 ## Configuration
 
