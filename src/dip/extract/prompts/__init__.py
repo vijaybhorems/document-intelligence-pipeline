@@ -16,7 +16,7 @@ from dip.schema.registry import FieldSpec
 if TYPE_CHECKING:
     from dip.extract.examples import FieldNotes
 
-CURRENT_VERSION = "v1"
+CURRENT_VERSION = "v4"  # decision D5; see docs/adr/D5-prompt-strategy.md
 
 
 # What each version adds (decision D5). Each builds on the one before, so the

@@ -73,3 +73,5 @@ def test_extractor_sends_excerpts_and_records_embedding_spend() -> None:
     assert extractor.config()["context"] == "retrieved"
     assert len(spend) == 3  # query embeddings, contract embeddings, the LLM call
     assert out.usage.cost_usd > 0
+    assert out.usage.embedding_tokens > 0
+    assert out.usage.input_tokens == 1000  # only the LLM call; embeddings counted separately

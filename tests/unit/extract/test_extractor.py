@@ -211,7 +211,7 @@ def test_own_schema_variant_sends_a_schema_per_call() -> None:
     out = extractor.predict_all({"d1": TEXT})["d1"]
 
     assert len({c["text_format"] for c in responses.calls}) == 6
-    assert extractor.name.endswith("-own_schema")
+    assert "-own_schema" in extractor.name
     assert out.fields.governing_law.values == ["Texas"]
 
 

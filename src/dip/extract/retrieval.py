@@ -64,7 +64,9 @@ class Retriever:
 
     def _cost(self, texts: Sequence[str]) -> Usage:
         tokens = sum(len(self._encoder.encode(t, disallowed_special=())) for t in texts)
-        return Usage(calls=1, input_tokens=tokens, cost_usd=cost_usd(self.model_name, tokens, 0, 0))
+        return Usage(
+            calls=1, embedding_tokens=tokens, cost_usd=cost_usd(self.model_name, tokens, 0, 0)
+        )
 
     def prepare_queries(
         self, specs: Sequence[FieldSpec], version: str, on_usage: Callable[[Usage], None] | None
