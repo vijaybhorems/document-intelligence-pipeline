@@ -1,0 +1,5 @@
+Your previous answer for the fields above failed validation:
+
+$problems
+
+Re-read the contract and answer these fields again. Quote the contract exactly, word for word. If the contract does not actually contain what a field asks for, return an empty answer for it.

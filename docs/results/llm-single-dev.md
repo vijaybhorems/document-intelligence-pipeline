@@ -1,8 +1,8 @@
 # Eval report: `20261020-211036-llm-gpt-5.6-luna-single-dev`
 
-| system | split | contracts | git | created (UTC) |
-|---|---|---|---|---|
-| llm-gpt-5.6-luna-single | dev | 80 | `e3ac30c` | 2026-10-20 21:10 |
+| system | split | contracts | git | created (UTC) | cost/contract | p50 / p95 |
+|---|---|---|---|---|---|---|
+| llm-gpt-5.6-luna-single | dev | 80/80 | `e3ac30c` | 2026-10-20 21:10 | $0.0048 | 12.8s / 16.8s |
 
 Percentages. **Headline metric**: presence for clauses, value for typed fields. Micro pools TP/FP/FN across fields; macro averages per-field F1, so rare fields count equally. CIs: 1,000 bootstrap resamples of contracts.
 
@@ -134,6 +134,21 @@ Canonical = gold text contains the field's obvious wording (`canonical_cues` in 
 | `volume_restriction` | 0.0 | 7 | 50.0 | 4 | -50.0 |
 | `warranty_duration` | 100.0 | 9 | 33.3 | 3 | +66.7 |
 | **all** | 92.9 | 632 | 81.2 | 213 | +11.7 |
+
+## Validation
+
+Grounding locates every predicted quote in the contract (SPEC §8.3). A false positive with no grounded quote is a hallucination; one backed by real text is an over-trigger (wrong legal reading). They need different fixes.
+
+|  | count | % |
+|---|---|---|
+| valid outputs (no L1/L2 issue) | 79/80 | 98.8 |
+| quotes found in the contract | 1457/1459 | 99.9 |
+| values with no grounded evidence | 1/1197 | 0.1 |
+| false positives, ungrounded (**hallucinated**) | 0/274 | 0.0 |
+| false positives, grounded (over-triggers) | 274/274 |  |
+| correct fields whose quote wasn't found | 1 |  |
+
+Validation issues: none recorded.
 
 ## Compared with `20261020-203205-keyword-dev` (keyword)
 

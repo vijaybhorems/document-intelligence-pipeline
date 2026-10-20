@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 3 (LLM extraction v0) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
+Phase 4 (validation & grounding) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
 
 ## Quickstart
 
@@ -60,6 +60,7 @@ uv run dip report <run_id> --compare <other_run_id>       # re-render, with a co
 uv run dip estimate --system llm --split dev                          # tokens + cost, no API calls
 uv run dip eval --system llm --strategy single --split dev           # needs DIP_OPENAI_API_KEY
 uv run dip spend                                                       # spend so far vs DIP_BUDGET_USD
+uv run dip validate <run_id> --policy warn --reask                    # ground + check + re-ask failing fields
 ```
 
 Runs live in `data/runs/<run_id>/` (predictions, per-field results as Parquet, per-call `usage.jsonl`, report). Committed reports: [docs/results/](docs/results/).

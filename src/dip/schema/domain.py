@@ -174,6 +174,15 @@ LabelIssueKind = Literal[
 ]
 
 
+class ValidationIssue(_Model):
+    """A problem found by validation (SPEC §8). Errors trigger a re-ask (D6); warnings don't."""
+
+    field: str  # registry name, or "*" for the whole contract
+    code: str
+    severity: Literal["error", "warning"]
+    message: str
+
+
 class LabelIssue(_Model):
     field: str
     kind: LabelIssueKind

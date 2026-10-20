@@ -305,7 +305,15 @@ def report(
     if compare:
         other = _run_dir(compare)
         baseline = (load_meta(other), load_results(other))
-    text = render(load_meta(run_dir), load_results(run_dir), baseline)
+    from dip.eval.validation_metrics import ValidationMetrics
+
+    validation_file = run_dir / "validation.json"
+    validation = (
+        ValidationMetrics.model_validate_json(validation_file.read_text("utf-8"))
+        if validation_file.exists()
+        else None
+    )
+    text = render(load_meta(run_dir), load_results(run_dir), baseline, validation)
     (run_dir / "report.md").write_text(text, encoding="utf-8")
     if out:
         out.write_text(text, encoding="utf-8")
@@ -339,6 +347,64 @@ def eval_cmd(
     typer.echo(f"run: {run_dir.name}")
     score(run_dir.name)
     report(run_dir.name, compare=compare, out=out)
+
+
+# ── Phase 4: validation ──────────────────────────────────────────────────────
+
+
+@app.command()
+def validate(
+    run_id: str,
+    policy: Annotated[str, typer.Option(help="warn | drop (decision D7)")] = "drop",
+    reask: Annotated[
+        bool, typer.Option("--reask", help="Re-ask the model for fields that fail (D6).")
+    ] = False,
+    enforce_rules: Annotated[
+        bool,
+        typer.Option("--enforce-rules", help="Drop dependent clauses whose parent is missing."),
+    ] = False,
+    max_cost_usd: MaxCostOpt = None,
+    compare: Annotated[str | None, typer.Option(help="run_id to compare against.")] = None,
+    out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
+) -> None:
+    """Ground, check and re-score a saved run, without re-extracting (free unless --reask)."""
+    from dip.eval.derive import validate_run
+    from dip.eval.runs import load_meta, spent_usd
+    from dip.extract.extractor import OpenAIExtractor, Strategy
+    from dip.validate.validator import Policy
+
+    base_dir = _run_dir(run_id)
+    reasker = None
+    cap = None
+    if reask:
+        settings = get_settings()
+        if settings.openai_api_key is None:
+            raise typer.BadParameter("set DIP_OPENAI_API_KEY in .env first")
+        base_config = load_meta(base_dir).config
+        reasker = OpenAIExtractor(
+            model=base_config.get("model", settings.extraction_model),
+            strategy=Strategy.SINGLE,
+            reasoning_effort=base_config.get("reasoning_effort", settings.reasoning_effort),
+            max_concurrency=settings.max_concurrency,
+            timeout_s=settings.request_timeout_s,
+            api_key=settings.openai_api_key.get_secret_value(),
+        )
+        remaining = settings.budget_usd - spent_usd(_paths()["runs"])
+        cap = remaining if max_cost_usd is None else min(remaining, max_cost_usd)
+        typer.echo(f"re-asking failing fields; budget left ${remaining:.2f}, stops at ${cap:.2f}")
+    run_dir = validate_run(
+        base_dir,
+        get_settings().data_dir,
+        _paths()["runs"],
+        Policy(policy),
+        reasker,
+        cap,
+        enforce_rules,
+    )
+    meta = load_meta(run_dir)
+    typer.echo(f"run: {run_dir.name}  (re-ask cost ${meta.usage.cost_usd:.4f})")
+    score(run_dir.name)
+    report(run_dir.name, compare=compare or run_id, out=out)
 
 
 if __name__ == "__main__":

@@ -210,7 +210,10 @@ class OpenAIExtractor:
         name: str,
         specs: list[FieldSpec],
         model_cls: type[BaseModel],
+        feedback: str | None = None,
+        shared_schema: bool | None = None,
     ) -> tuple[dict[str, LLMField], Usage, list[str]]:
+        shared = self.shared_schema if shared_schema is None else shared_schema
         max_tokens = min(
             MAX_OUTPUT_TOKENS_BASE + MAX_OUTPUT_TOKENS_PER_FIELD * len(specs),
             MAX_OUTPUT_TOKENS_CAP,
@@ -230,9 +233,10 @@ class OpenAIExtractor:
                             {
                                 "role": "user",
                                 "content": prompts.fields_prompt(
-                                    specs, self.prompt_version, self.shared_schema
+                                    specs, self.prompt_version, shared
                                 ),
                             },
+                            *([{"role": "user", "content": feedback}] if feedback else []),
                         ],
                         text_format=model_cls,
                         reasoning=cast("Reasoning", {"effort": self.reasoning_effort}),
@@ -271,6 +275,60 @@ class OpenAIExtractor:
                 [f"{name}: returned null for {', '.join(missing)}"] if missing else [],
             )
         return {}, usage, [f"{name}: output truncated after retry"]
+
+    # ── Re-ask (D6) ──────────────────────────────────────────────────────────
+
+    def reask(
+        self,
+        texts: dict[str, str],
+        problems: dict[str, dict[str, list[str]]],
+        max_cost_usd: float | None = None,
+        on_usage: Callable[[Usage], None] | None = None,
+    ) -> dict[str, tuple[dict[str, LLMField], Usage, list[str]]]:
+        """One follow-up call per contract for just the fields that failed validation.
+
+        ``problems`` maps doc_id -> field name -> what was wrong. The model gets the
+        same system prompt and contract, the field list, and the feedback.
+        Returns doc_id -> (fresh LLM output for those fields, usage, issues).
+        """
+        return asyncio.run(self._reask_all(texts, problems, max_cost_usd, on_usage))
+
+    async def _reask_all(
+        self,
+        texts: dict[str, str],
+        problems: dict[str, dict[str, list[str]]],
+        max_cost_usd: float | None,
+        on_usage: Callable[[Usage], None] | None,
+    ) -> dict[str, tuple[dict[str, LLMField], Usage, list[str]]]:
+        client = self._client or AsyncOpenAI(
+            api_key=self._api_key, timeout=self.timeout_s, max_retries=4
+        )
+        calls = asyncio.Semaphore(self.max_concurrency)
+        budget = _Budget(max_cost_usd, on_usage)
+        shared = output_model("AllFields", list(FIELDS), nullable=True)
+        results: dict[str, tuple[dict[str, LLMField], Usage, list[str]]] = {}
+
+        async def one(doc_id: str, by_field: dict[str, list[str]]) -> None:
+            if budget.exhausted:
+                return
+            specs = [s for s in FIELDS if s.name in by_field]
+            feedback = prompts.reask_feedback(by_field)
+            cache_key = "dip-" + hashlib.sha256(texts[doc_id].encode()).hexdigest()[:24]
+            results[doc_id] = await self._call(
+                client,
+                calls,
+                budget,
+                texts[doc_id],
+                cache_key,
+                "reask",
+                specs,
+                shared,
+                feedback=feedback,
+                shared_schema=True,
+            )
+
+        await asyncio.gather(*(one(d, p) for d, p in sorted(problems.items()) if p))
+        return results
 
     def _usage(self, response: Any) -> Usage:
         u = response.usage

@@ -24,7 +24,7 @@ from dip.eval.scorer import FieldResult, Metric, score
 from dip.eval.slices import Slice
 from dip.extract.system import System, Usage
 from dip.ingest.splits import load_splits
-from dip.schema.domain import SCHEMA_VERSION, ContractFields, GoldRecord
+from dip.schema.domain import SCHEMA_VERSION, ContractFields, GoldRecord, ValidationIssue
 from dip.schema.registry import FieldType
 
 
@@ -43,6 +43,7 @@ class RunMeta(BaseModel):
     latency_p50_s: float = 0.0
     latency_p95_s: float = 0.0
     issues: int = 0
+    derived_from: str | None = None  # base run_id when this run re-processes another's predictions
 
     @model_validator(mode="before")
     @classmethod
@@ -61,7 +62,8 @@ class Prediction(BaseModel):
     doc_id: str
     fields: ContractFields
     usage: Usage = Usage()
-    issues: list[str] = []
+    issues: list[str] = []  # extraction (L1/L2) issues
+    validation_issues: list[ValidationIssue] = []
 
 
 def _quantile(values: list[float], q: float) -> float:
@@ -178,7 +180,8 @@ def run_spend_usd(run_dir: Path) -> float:
         lines = ledger.read_text("utf-8").splitlines()
         return sum(Usage.model_validate_json(line).cost_usd for line in lines if line.strip())
     if (run_dir / "run.json").exists():
-        return load_meta(run_dir).usage.cost_usd
+        meta = load_meta(run_dir)
+        return 0.0 if meta.derived_from else meta.usage.cost_usd  # base run already counted
     return 0.0
 
 
@@ -190,9 +193,21 @@ def spent_usd(runs_dir: Path) -> float:
 def score_run(run_dir: Path, data_dir: Path) -> list[FieldResult]:
     meta = load_meta(run_dir)
     gold = {doc_id: r.fields for doc_id, r in load_gold(data_dir, meta.split).items()}
-    predictions = {doc_id: p.fields for doc_id, p in load_predictions(run_dir).items()}
+    loaded = load_predictions(run_dir)
+    predictions = {doc_id: p.fields for doc_id, p in loaded.items()}
     results = score(predictions, gold)
     write_results(results, meta.run_id, run_dir / "field_results.parquet")
+
+    from dip.eval.validation_metrics import measure
+
+    metrics = measure(
+        predictions,
+        gold,
+        split_texts(data_dir, meta.split),
+        {doc_id: p.issues for doc_id, p in loaded.items()},
+        {doc_id: p.validation_issues for doc_id, p in loaded.items()},
+    )
+    (run_dir / "validation.json").write_text(metrics.model_dump_json(indent=2), "utf-8")
     return results
 
 

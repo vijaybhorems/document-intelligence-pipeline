@@ -38,3 +38,11 @@ def fields_prompt(
     return Template(_read(version, "fields.txt")).substitute(
         field_list=field_list, scope_note=SHARED_SCHEMA_NOTE if shared_schema else ""
     )
+
+
+def reask_feedback(problems: dict[str, list[str]], version: str = CURRENT_VERSION) -> str:
+    """Tell the model what failed validation, field by field (decision D6)."""
+    lines = "\n".join(
+        f"- {name}: " + " ".join(messages) for name, messages in sorted(problems.items())
+    )
+    return Template(_read(version, "reask.txt")).substitute(problems=lines)
