@@ -13,9 +13,10 @@ contract. That's the gap a good prompt has to close.
 
 import re
 from collections.abc import Iterator
-from typing import Protocol
+from typing import Any
 
 from dip.eval.slices import has_cue
+from dip.extract.system import System, SystemOutput
 from dip.schema.domain import (
     ClauseField,
     ClauseSet,
@@ -35,15 +36,24 @@ MAX_EVIDENCE_PER_FIELD = 3
 MAX_QUOTE_CHARS = 600
 
 
-class System(Protocol):
-    """Anything that turns contract text into fields: a baseline now, an LLM pipeline later."""
+class SimpleSystem:
+    """A free, deterministic system: predicts one contract at a time, no API calls."""
 
-    name: str
+    name = "simple"
 
-    def predict(self, text: str) -> ContractFields: ...
+    def predict(self, text: str) -> ContractFields:
+        raise NotImplementedError
+
+    def config(self) -> dict[str, Any]:
+        return {}
+
+    def predict_all(
+        self, texts: dict[str, str], max_cost_usd: float | None = None
+    ) -> dict[str, SystemOutput]:
+        return {doc_id: SystemOutput(fields=self.predict(text)) for doc_id, text in texts.items()}
 
 
-class AllAbsent:
+class AllAbsent(SimpleSystem):
     name = "all_absent"
 
     def predict(self, text: str) -> ContractFields:
@@ -91,7 +101,7 @@ _BETWEEN = re.compile(
 )
 
 
-class KeywordBaseline:
+class KeywordBaseline(SimpleSystem):
     name = "keyword"
 
     def predict(self, text: str) -> ContractFields:

@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     gcp_project: str | None = None
 
+    # Extraction (Phase 3). Model choice is decision D2; see docs/adr/.
+    extraction_model: str = "gpt-5.6-luna"
+    reasoning_effort: str = "low"
+    max_concurrency: int = 8  # parallel API calls
+    request_timeout_s: float = 180.0
+    # Total spend allowed across all eval runs recorded in data/runs (SPEC §19).
+    budget_usd: float = 10.0
+
 
 @lru_cache
 def get_settings() -> Settings:

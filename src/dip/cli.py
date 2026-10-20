@@ -1,12 +1,15 @@
 """``dip`` command-line entry point."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from dip import __version__
 from dip.config import get_settings
+
+if TYPE_CHECKING:
+    from dip.extract.system import System
 
 app = typer.Typer(help="Document intelligence pipeline.", no_args_is_help=True)
 
@@ -142,19 +145,125 @@ def _run_dir(run_id: str) -> Path:
     return run_dir
 
 
+SystemOpt = Annotated[str, typer.Option("--system", help="all_absent | keyword | llm")]
+ModelOpt = Annotated[str | None, typer.Option(help="LLM model (default: DIP_EXTRACTION_MODEL).")]
+StrategyOpt = Annotated[str, typer.Option(help="LLM call strategy: single | grouped | per_field")]
+EffortOpt = Annotated[
+    str | None, typer.Option(help="Reasoning effort (default: DIP_REASONING_EFFORT).")
+]
+SplitOpt = Annotated[str, typer.Option(callback=_check_split)]
+OwnSchemaOpt = Annotated[
+    bool,
+    typer.Option(
+        "--own-schema", help="Give each call its own schema (defeats prompt caching; for D4)."
+    ),
+]
+MaxCostOpt = Annotated[
+    float | None, typer.Option(help="Stop this run once it has spent this much (USD).")
+]
+
+
+def _make_system(
+    system: str, model: str | None, strategy: str, effort: str | None, own_schema: bool = False
+) -> "System":
+    from dip.eval.baselines import SYSTEMS
+    from dip.extract.extractor import OpenAIExtractor, Strategy
+
+    if system in SYSTEMS:
+        return SYSTEMS[system]
+    if system != "llm":
+        raise typer.BadParameter(f"unknown system {system!r}; choose from {[*SYSTEMS, 'llm']}")
+    settings = get_settings()
+    if settings.openai_api_key is None:
+        raise typer.BadParameter("set DIP_OPENAI_API_KEY in .env first")
+    if strategy not in Strategy.__members__.values():
+        raise typer.BadParameter(f"--strategy must be one of {[s.value for s in Strategy]}")
+    return OpenAIExtractor(
+        model=model or settings.extraction_model,
+        strategy=Strategy(strategy),
+        reasoning_effort=effort or settings.reasoning_effort,
+        shared_schema=not own_schema,
+        max_concurrency=settings.max_concurrency,
+        timeout_s=settings.request_timeout_s,
+        api_key=settings.openai_api_key.get_secret_value(),
+    )
+
+
+def _budget_check(system: object, split: str, max_cost: float | None) -> float | None:
+    """Print the estimate and remaining budget; refuse runs that can't fit. Returns the run cap."""
+    from dip.eval.runs import spent_usd, split_texts
+    from dip.extract.estimate import estimate
+    from dip.extract.extractor import OpenAIExtractor
+
+    if not isinstance(system, OpenAIExtractor):
+        return None
+    remaining = get_settings().budget_usd - spent_usd(_paths()["runs"])
+    cap = remaining if max_cost is None else min(remaining, max_cost)
+    est = estimate(system, split_texts(get_settings().data_dir, split))
+    typer.echo(
+        f"estimate: {est.contracts} contracts, {est.calls} calls, "
+        f"{est.input_tokens:,} input + ~{est.output_tokens:,} output tokens, "
+        f"${est.cost_with_cache_usd:.2f} with caching (${est.cost_no_cache_usd:.2f} without). "
+        f"Budget left: ${remaining:.2f}; this run stops at ${cap:.2f}."
+    )
+    if est.cost_with_cache_usd > cap:
+        typer.echo("Estimate exceeds the cap. Raise --max-cost-usd or DIP_BUDGET_USD.", err=True)
+        raise typer.Exit(1)
+    return cap
+
+
+@app.command()
+def estimate(
+    system: SystemOpt = "llm",
+    split: SplitOpt = "dev",
+    model: ModelOpt = None,
+    strategy: StrategyOpt = "grouped",
+    effort: EffortOpt = None,
+    own_schema: OwnSchemaOpt = False,
+) -> None:
+    """Estimate a run's tokens and cost without calling the API."""
+    _budget_check(_make_system(system, model, strategy, effort, own_schema), split, max_cost=None)
+
+
+@app.command()
+def spend() -> None:
+    """Total recorded spend across all runs, against DIP_BUDGET_USD."""
+    from dip.eval.runs import load_meta, spent_usd
+
+    runs = _paths()["runs"]
+    for run_dir in sorted(runs.glob("*")):
+        if (run_dir / "run.json").exists() and (cost := load_meta(run_dir).usage.cost_usd):
+            typer.echo(f"  ${cost:7.4f}  {run_dir.name}")
+    typer.echo(f"spent ${spent_usd(runs):.4f} of ${get_settings().budget_usd:.2f}")
+
+
 @app.command()
 def predict(
-    system: Annotated[str, typer.Option(help="all_absent | keyword")],
-    split: Annotated[str, typer.Option(callback=_check_split)] = "dev",
+    system: SystemOpt,
+    split: SplitOpt = "dev",
+    model: ModelOpt = None,
+    strategy: StrategyOpt = "grouped",
+    effort: EffortOpt = None,
+    own_schema: OwnSchemaOpt = False,
+    max_cost_usd: MaxCostOpt = None,
 ) -> None:
     """Run a system over a split and save its predictions as a new run."""
-    from dip.eval.baselines import SYSTEMS
+    from dip.eval.runs import load_meta
     from dip.eval.runs import predict as run_predict
 
-    if system not in SYSTEMS:
-        raise typer.BadParameter(f"unknown system {system!r}; choose from {sorted(SYSTEMS)}")
-    run_dir = run_predict(SYSTEMS[system], split, get_settings().data_dir, _paths()["runs"])
-    typer.echo(run_dir.name)
+    built = _make_system(system, model, strategy, effort, own_schema)
+    cap = _budget_check(built, split, max_cost_usd)
+    run_dir = run_predict(built, split, get_settings().data_dir, _paths()["runs"], cap)
+    meta = load_meta(run_dir)
+    typer.echo(
+        f"run: {run_dir.name}  ({meta.n_predicted}/{meta.n_docs} contracts, "
+        f"${meta.usage.cost_usd:.4f}, {meta.usage.cached_tokens:,}/{meta.usage.input_tokens:,} "
+        f"input tokens cached, p50 {meta.latency_p50_s:.1f}s, {meta.issues} issues)"
+    )
+    if not meta.complete:
+        typer.echo(
+            "INCOMPLETE: stopped at the cost cap; missing contracts score as empty.", err=True
+        )
 
 
 @app.command()
@@ -190,18 +299,22 @@ def report(
 
 @app.command("eval")
 def eval_cmd(
-    system: Annotated[str, typer.Option(help="all_absent | keyword")],
-    split: Annotated[str, typer.Option(callback=_check_split)] = "dev",
+    system: SystemOpt,
+    split: SplitOpt = "dev",
+    model: ModelOpt = None,
+    strategy: StrategyOpt = "grouped",
+    effort: EffortOpt = None,
+    own_schema: OwnSchemaOpt = False,
+    max_cost_usd: MaxCostOpt = None,
     compare: Annotated[str | None, typer.Option(help="run_id to compare against.")] = None,
     out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
 ) -> None:
     """predict + score + report in one go."""
-    from dip.eval.baselines import SYSTEMS
     from dip.eval.runs import predict as run_predict
 
-    if system not in SYSTEMS:
-        raise typer.BadParameter(f"unknown system {system!r}; choose from {sorted(SYSTEMS)}")
-    run_dir = run_predict(SYSTEMS[system], split, get_settings().data_dir, _paths()["runs"])
+    built = _make_system(system, model, strategy, effort, own_schema)
+    cap = _budget_check(built, split, max_cost_usd)
+    run_dir = run_predict(built, split, get_settings().data_dir, _paths()["runs"], cap)
     typer.echo(f"run: {run_dir.name}")
     score(run_dir.name)
     report(run_dir.name, compare=compare, out=out)

@@ -1,0 +1,4 @@
+Extract the following fields from the contract above. Each field's definition is below and in the response schema.
+
+$field_list
+$scope_note
