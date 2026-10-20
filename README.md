@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 0 (foundations). See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
+Phase 1 (data & gold labels) complete. See the delivery plan in [SPEC §14](docs/SPEC.md#14-delivery-plan).
 
 ## Quickstart
 
@@ -37,6 +37,17 @@ Creates the `dev` and `prod` projects, links billing, and sets monthly budget al
 ```bash
 ./infra/bootstrap/gcp-bootstrap.sh
 ```
+
+## Data (Phase 1)
+
+```bash
+uv run dip download-cuad   # 106 MB from Zenodo, MD5-verified, into data/raw/
+uv run dip build-gold      # data/gold/*.json + Parquet tables
+uv run dip profile-pdfs    # text-layer coverage of every PDF
+uv run dip cuad-report     # regenerates docs/notes/cuad-dataset-profile.md
+```
+
+`data/splits.json` is committed and frozen. `dip make-splits` won't overwrite it without `--force`. Findings: [CUAD quirks](docs/notes/cuad-quirks.md), [dataset profile](docs/notes/cuad-dataset-profile.md).
 
 ## Configuration
 

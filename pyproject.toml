@@ -6,8 +6,11 @@ readme = "README.md"
 authors = [{ name = "Vijay Bhore", email = "bhore.vijay@gmail.com" }]
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "duckdb>=1.5.6",
+    "httpx>=0.28.1",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
+    "pypdf>=6.21.1",
     "typer>=0.27.3",
 ]
 
@@ -49,7 +52,11 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is how pytest works
+"tests/**" = [
+  "S101",  # assert is how pytest works
+  "S311",  # seeded random.Random is fine for sampling tests
+  "S608",  # SQL over tmp_path files, no user input
+]
 
 # ---------------------------------------------------------------- pyright
 [tool.pyright]
@@ -66,6 +73,7 @@ addopts = ["-ra", "--strict-markers", "--strict-config", "-m", "not integration 
 markers = [
   "integration: needs emulators or network; excluded from the default run",
   "llm: calls a real LLM API and costs money; excluded from the default run",
+  "cuad: needs the downloaded CUAD dataset; skips itself when data/raw/CUAD_v1 is absent",
 ]
 
 [tool.coverage.run]
