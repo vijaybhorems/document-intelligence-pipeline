@@ -3,10 +3,11 @@
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from llama_index.core import MockEmbedding
 
 from dip.extract.extractor import OpenAIExtractor, Strategy
-from dip.extract.retrieval import Retriever, field_query
+from dip.extract.retrieval import Retriever, field_query, split_sentences
 from dip.schema.registry import FIELDS, FIELDS_BY_NAME
 from tests.unit.extract.test_extractor import ANSWERS, FakeResponses
 
@@ -75,3 +76,31 @@ def test_extractor_sends_excerpts_and_records_embedding_spend() -> None:
     assert out.usage.cost_usd > 0
     assert out.usage.embedding_tokens > 0
     assert out.usage.input_tokens == 1000  # only the LLM call; embeddings counted separately
+
+
+def test_sentence_splitter_never_touches_nltk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: NLTK punkt refuses hardlinked data files; uv hardlinks on Linux (CI)."""
+    import llama_index.core.utils as li_utils
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("NLTK punkt tokenizer was called")
+
+    monkeypatch.setattr(li_utils.GlobalsHelper, "punkt_tokenizer", property(boom))
+
+    ex = Retriever(MockEmbedding(embed_dim=8), top_k=2, chunk_tokens=128)
+    ex.prepare_queries(list(FIELDS), "v4", None)
+
+    assert ex.excerpts(TEXT, list(FIELDS), "v4").chunks_total > 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "One. Two; three: four! Five?",
+        "No punctuation at all",
+        "Ends with newline.\n\nNext para.",
+        "",
+    ],
+)
+def test_split_sentences_is_lossless(text: str) -> None:
+    assert "".join(split_sentences(text)) == text

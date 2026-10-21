@@ -8,8 +8,14 @@ which is what D3 measures.
 
 Query embeddings are the same for every contract, so they're computed once.
 Embedding spend is reported through ``on_usage`` like any other paid call.
+
+Sentences are split with a regex rather than LlamaIndex's default NLTK punkt
+tokenizer. Punkt loads data files bundled in the wheel, and NLTK's path security
+refuses to open them when the installer hardlinked them (uv does by default on
+Linux, so CI and Docker builds broke). The regex needs no data files.
 """
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -29,6 +35,13 @@ CHUNK_TOKENS = 384
 CHUNK_OVERLAP = 48
 TOP_K = 3
 _GAP = "\n[...]\n"
+# Split after sentence-ending punctuation that's followed by whitespace. Lookarounds
+# keep every character, so the pieces join back to the exact original text.
+_SENTENCE_END = re.compile(r"(?<=[.;:!?])(?=\s)")
+
+
+def split_sentences(text: str) -> list[str]:
+    return [piece for piece in _SENTENCE_END.split(text) if piece]
 
 
 @dataclass(frozen=True)
@@ -57,7 +70,11 @@ class Retriever:
     ) -> None:
         self.embed_model = embed_model
         self.top_k = top_k
-        self.splitter = SentenceSplitter(chunk_size=chunk_tokens, chunk_overlap=CHUNK_OVERLAP)
+        self.splitter = SentenceSplitter(
+            chunk_size=chunk_tokens,
+            chunk_overlap=CHUNK_OVERLAP,
+            chunking_tokenizer_fn=split_sentences,
+        )
         self.model_name = embedding_model_name
         self._encoder = tiktoken.get_encoding("o200k_base")
         self._queries: dict[str, list[float]] = {}

@@ -34,6 +34,7 @@ Embeddings add 11,309 tokens per contract at $0.02/M, which is negligible ($0.00
 2. **Recall paid for it:** clause recall fell 89 → 84–85, and the CIs exclude zero. Clauses sit in unexpected places (definitions, schedules, termination sections), which is the risk the spec predicted.
 3. **Definitions help under retrieval** (+1.2 over retrieved without them), but not enough to close the gap.
 4. **An accounting bug:** embedding tokens were first counted as LLM input tokens, which made retrieved runs look *more* expensive in input. `Usage.embedding_tokens` now keeps them apart.
+5. **After these runs, the sentence splitter changed** from LlamaIndex's default (NLTK punkt) to a regex. NLTK refuses data files that uv installed as hardlinks, which broke CI on Linux. Chunk boundaries shift slightly as a result. The decision doesn't hinge on them: retrieval isn't the default, and the gap is 3–4 points. Re-measure if you revisit D3.
 
 ## Decision
 
