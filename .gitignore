@@ -42,3 +42,6 @@ crash.log
 .DS_Store
 .idea/
 .vscode/
+
+# Terraform (infra/terraform): lock file is committed; working dir and plans are not.
+infra/terraform/.terraform/

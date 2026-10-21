@@ -120,7 +120,7 @@ def test_worker_traces_for_its_lifetime(
     from dip.worker import app as worker_app
 
     calls: list[str] = []
-    monkeypatch.setattr(worker_app, "configure_tracing", lambda *a: calls.append("start"))
+    monkeypatch.setattr(worker_app, "start_tracing", lambda *a: calls.append("start"))
     monkeypatch.setattr(worker_app, "shutdown_tracing", lambda: calls.append("stop"))
 
     with TestClient(create_app(services)):

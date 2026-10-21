@@ -25,6 +25,7 @@ dependencies = [
     "pydantic-settings>=2.16.0",
     "pypdf>=6.21.1",
     "pypdfium2>=5.14.0",
+    "python-dotenv>=1.1",
     "python-multipart>=0.0.32",
     "rapidfuzz>=3.14.6",
     "structlog>=26.1.0",

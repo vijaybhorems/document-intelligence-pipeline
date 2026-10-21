@@ -83,7 +83,9 @@ class HttpQueue:
 
 
 class CloudTasksQueue:
-    def __init__(self, queue: str, worker_url: str, invoker_email: str) -> None:
+    def __init__(
+        self, queue: str, worker_url: str, invoker_email: str, deadline_s: int = 900
+    ) -> None:
         from google.cloud import tasks_v2
 
         self._client = tasks_v2.CloudTasksClient()
@@ -92,8 +94,14 @@ class CloudTasksQueue:
         self.url = worker_url.rstrip("/") + "/internal/process"
         self.invoker_email = invoker_email
         self.audience = worker_url.rstrip("/")
+        # How long Cloud Tasks waits for the worker before calling it a failure and
+        # redelivering. Default 10 min; match the worker's Cloud Run timeout (15 min) so a
+        # long scan isn't retried while the first attempt is still running.
+        self.deadline_s = deadline_s
 
     def enqueue(self, job_id: str) -> None:
+        from google.protobuf import duration_pb2
+
         t = self._tasks_v2
         task = t.Task(
             http_request=t.HttpRequest(
@@ -104,6 +112,7 @@ class CloudTasksQueue:
                 oidc_token=t.OidcToken(
                     service_account_email=self.invoker_email, audience=self.audience
                 ),
-            )
+            ),
+            dispatch_deadline=duration_pb2.Duration(seconds=self.deadline_s),
         )
         self._client.create_task(parent=self.queue, task=task)

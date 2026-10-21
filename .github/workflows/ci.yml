@@ -53,7 +53,26 @@ jobs:
           for role in api worker; do
             docker run -d --name "$role" -e DIP_ROLE="$role" -p 127.0.0.1::8080 dip:ci
             port=$(docker port "$role" 8080 | head -1 | cut -d: -f2)
-            curl -fsS --retry 20 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$port/healthz"
+            curl -fsS --retry 20 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$port/health"
             echo " <- $role"
           done
           docker run --rm --entrypoint id dip:ci -u | grep -qx 10001
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_version: 1.16.6
+
+      - name: Format, validate
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate

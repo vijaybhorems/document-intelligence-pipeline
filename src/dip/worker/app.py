@@ -14,12 +14,12 @@ from pydantic import BaseModel
 
 from dip.config import Environment, get_settings
 from dip.observability.logging import configure_logging
-from dip.observability.tracing import configure_tracing, shutdown_tracing
+from dip.observability.tracing import shutdown_tracing, start_tracing
 from dip.service import problems
 from dip.service.auth import check_internal
 from dip.service.backends import Services, build_services
 
-PROBES = frozenset({"/healthz", "/readyz"})
+PROBES = frozenset({"/health", "/ready"})
 
 
 class ProcessRequest(BaseModel):
@@ -34,7 +34,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # The worker is the only process that calls OpenAI, so it is the one that traces.
-        configure_tracing(settings.otel_endpoint, settings.trace_content)
+        start_tracing(settings)
         yield
         shutdown_tracing()  # flush spans on SIGTERM; Cloud Run gives 10 s
 
@@ -50,8 +50,8 @@ def create_app(services: Services | None = None) -> FastAPI:
     )
     problems.install(app)
 
-    @app.get("/healthz", include_in_schema=False)
-    def healthz() -> dict[str, str]:
+    @app.get("/health", include_in_schema=False)
+    def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/internal/process")

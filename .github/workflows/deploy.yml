@@ -1,0 +1,62 @@
+name: Deploy (dev)
+
+# On every merge to main: build the image, push it, roll it out to dev, smoke-test.
+# Infrastructure changes are applied by a person with Terraform (ADR I10); this
+# workflow can only push images and update the two Cloud Run services.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # re-deploy main by hand (Workload Identity only trusts main)
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC token, exchanged for a short-lived Google token
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false # never interrupt a rollout halfway
+
+jobs:
+  deploy:
+    if: vars.GCP_WIF_PROVIDER != '' # skip in forks and before infra exists
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dev
+    env:
+      GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      IMAGE: ${{ vars.GCP_IMAGE_REPO }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
+
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          docker build -f docker/Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+          # Deploy by digest: the revision runs exactly these bytes, whatever the tag does later.
+          echo "DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE")" >> "$GITHUB_ENV"
+
+      - name: Roll out (worker first, so the API never enqueues for an older worker)
+        run: |
+          for service in dip-worker dip-api; do
+            gcloud run deploy "$service" --image "$DIGEST" \
+              --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
+          done
+
+      - name: Smoke test
+        run: |
+          url=$(gcloud run services describe dip-api --region "$GCP_REGION" \
+            --project "$GCP_PROJECT" --format 'value(status.url)')
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 3 "$url/ready"; echo
+          status=$(curl -s -o /dev/null -w '%{http_code}' "$url/v1/schema")
+          test "$status" = 401 || { echo "expected 401 without an API key, got $status"; exit 1; }
+          echo "Deployed $DIGEST to $url" >> "$GITHUB_STEP_SUMMARY"

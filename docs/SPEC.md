@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.11 |
+| **Status** | Draft v0.12 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-21 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -149,6 +149,7 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 | I5 | Analytics store | **DuckDB over Parquet in GCS** | Cloud Run disks are ephemeral. JSON records are the source of truth, compacted into Parquet that DuckDB reads. Upgrade path: MotherDuck. |
 | I6 | IaC | **Terraform** | Reproducible environments, and an industry-standard skill. |
 | I7 | Tooling | **uv**, ruff, pyright, pytest, pre-commit | Fast, modern, one lockfile. |
+| I10 | Who changes the cloud | **A person applies Terraform; CI only ships images** ([ADR I10](adr/I10-deploy-responsibility.md)) | The repo is public. A CI identity that can apply Terraform can rewrite IAM and secrets; one that can only push an image and update two services can't escalate. |
 | I8 | MCP authorization server | **Google OAuth** with a pre-registered client and in-app role mapping. An OAuth proxy only if a client requires Dynamic Client Registration. | It's already part of the GCP stack, there's no auth server to operate, and users sign in with Google accounts. Google lacks registration, custom scopes and audiences, so §12.2.5 compensates with client-ID audience checks and a Firestore role table. |
 
 ---
@@ -578,7 +579,7 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 | `GET /v1/schema` | JSON Schema of `ContractRecord` | `200` |
 | `GET /v1/analytics/{query_name}` | Whitelisted DuckDB queries | `200` · `404` |
 | `POST /internal/process` | Cloud Tasks only (OIDC) | `200` / `5xx` → retry |
-| `GET /healthz`, `/readyz` | Liveness / readiness | `200` |
+| `GET /health`, `/ready` | Liveness / readiness (not `/healthz`: Cloud Run reserves some paths ending in `z`) | `200` |
 
 - **Idempotency:** the same SHA-256 + pipeline version returns the cached record unless `?force=true`.
 - **Auth:** `X-API-Key` header with keys from Secret Manager. `/internal/*` accepts only the Cloud Tasks service account's OIDC token. With the HTTP queue that stands in for Cloud Tasks locally (docker compose), it takes a shared `X-Internal-Token` instead; the auth mode follows the queue, not the storage backend.
@@ -590,7 +591,7 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 
 | Metric | Target |
 |---|---|
-| p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). **Phase 7, first E2E (one 5-page contract, upload → record):** 13–14 s on both routes, locally and through compose; the queue and emulators add under a second. Real p95 comes from the Phase 9 load test. |
+| p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). **Phase 7, first E2E (one 5-page contract, upload → record):** 13–14 s on both routes, locally and through compose; the queue and emulators add under a second. Real p95 comes from the Phase 9 load test. **Phase 8, on Cloud Run:** about 17 s warm; a cold worker adds about 9 s, and the API's cold start is about 11 s. |
 | p95 latency, non-processing endpoints | < 300 ms |
 | Median cost per document | set from the D1/D2 decision, then enforced in CI. Phase 3 measured **$0.0048** (gpt-5.6-luna, single call, CUAD txt, dev). **After D1/D2:** about $0.0075 per born-digital contract and about $0.015 per scanned one (luna, prompt v4, experiment set). |
 | Job success rate (valid input) | ≥ 99% |
@@ -729,17 +730,18 @@ This applies "decisions through evals" to the agent layer.
   - Artifact Registry.
   - Cloud Run services `dip-api`, `dip-worker` and `dip-mcp` (Phase 9.5). Cloud Run Jobs `dip-compactor` and `dip-eval`. Cloud Scheduler.
   - Cloud Tasks queue, with dispatch rate and concurrency sized to your OpenAI limits.
-  - GCS bucket (uniform access, lifecycle rules), Firestore, and Secret Manager (`openai-api-key`, `arize-api-key`, `arize-space-id`, `api-keys`).
-  - Least-privilege service accounts (`sa-api`, `sa-worker`, `sa-tasks-invoker`, `sa-mcp`).
+  - GCS bucket (uniform access, lifecycle rules), Firestore, and Secret Manager (`openai-api-key`, `api-keys`, `arize-otlp-headers`). Arize's space ID and key are one secret because OTLP takes them as one header string. Terraform creates the secrets empty; values are added with `infra/bootstrap/dip-secrets.sh`, so they never enter Terraform state.
+  - Least-privilege service accounts (`sa-api`, `sa-worker`, `sa-tasks-invoker`, `sa-deployer`, and `sa-mcp` in Phase 9.5).
   - Google OAuth for `dip-mcp`: the consent screen and OAuth client are created manually (§12.2.5, documented in the runbook). Terraform manages the Secret Manager entries for the client ID and secret, and the Firestore `principals` collection's indexes.
   - **Budget alert** (set it up first).
   - Terraform state in GCS.
 - **Containers:** multi-stage builds with `uv`, a non-root user, and pinned base image digests. The `api` image is slim. The `worker` image includes Docling and pre-downloaded models. Track image size and cold-start time.
 - **CI/CD (GitHub Actions, Workload Identity Federation, no JSON keys):**
   - **On PR:** ruff, pyright, unit tests, schema snapshot test, docker build, and a **smoke eval** on 5 docs with cached parses. The PR fails if any field-type micro-F1 drops more than a configured threshold below the baseline.
-  - **On merge:** build, push, `terraform apply` to dev, deploy, and post-deploy smoke test.
+  - **On merge:** build, push, deploy both services by digest (worker first), and post-deploy smoke test. **Not** `terraform apply`: infrastructure is applied by a person (ADR I10).
   - **Prod:** manual approval, then promote the same image digest.
-- **Runbook (`docs/runbook.md`):** replay a failed job, re-extract everything with a new prompt version, roll back a Cloud Run revision, rotate keys, and respond to a budget alert.
+- **Runbook ([`docs/runbook.md`](runbook.md)):** first deploy, replay a failed job, re-extract everything with a new prompt version, roll back a Cloud Run revision, rotate keys, and respond to a budget alert.
+- **Status (Phase 8):** dev is live (`infra/terraform`, `envs/dev.tfvars`). Prod has a project and a budget but no deployment yet. Compactor, eval job and Scheduler come in Phase 9; `dip-mcp` in 9.5.
 
 ---
 
@@ -854,11 +856,11 @@ document_intelligence_pipeline/
 
 ## 18. Security
 
-- [ ] Secrets only in Secret Manager. Least-privilege service accounts. WIF in CI.
-- [ ] `/internal/*` OIDC-protected. Public endpoints need an API key.
-- [ ] Upload validation: size, MIME sniffing, page count.
+- [x] Secrets only in Secret Manager. Least-privilege service accounts. WIF in CI. *(Phase 8)*
+- [x] `/internal/*` OIDC-protected, checked twice: Cloud Run IAM (`run.invoker` for `sa-tasks-invoker` only, internal ingress) and the app. Public endpoints need an API key. *(Phases 7–8)*
+- [x] Upload validation: size, MIME sniffing, page count. *(Phase 7)*
 - [ ] Document text is **untrusted input**. The extractor has no tools, so prompt injection can only distort output, and grounding helps detect that. Note this in the threat model.
-- [ ] No document content in logs. The bucket is private. Dependency and image scanning are on.
+- [ ] No document content in logs. The bucket is private. Dependency and image scanning are on. *(Phase 8: logs carry IDs and hashes only, and the bucket enforces public-access prevention. Dependabot covers dependencies; Artifact Registry image scanning is not enabled yet, at $0.26 per image. Traces do carry contract text in dev (`trace_content`), which is fine for public CUAD filings and off for real documents.)*
 - [ ] MCP: Google OAuth (`openid email` only), client-ID audience check, fail-closed token validation, in-app roles keyed by Google `sub`, consent screen limited to Internal or Testing users, SSRF guard on `document_url`, `gcs_uri` limited to the project's bucket, no destructive tools, quote length cap, injection fixtures in CI, audit log of every tool call (§12.2.5).
 - [ ] CUAD documents are public filings. Real customer documents would also need retention policies, provider data-retention settings, and region pinning.
 
@@ -903,6 +905,13 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.12 (2026-10-21), Phase 8:**
+  - Dev deployed with Terraform: Cloud Run api/worker, Cloud Tasks, Firestore, GCS, Secret Manager, Artifact Registry, Workload Identity Federation.
+  - New ADR I10: a person applies Terraform; CI only ships images (§3.3, §13).
+  - §13: secrets layout (`arize-otlp-headers`), `sa-deployer`, deployment status.
+  - §12: health routes renamed to `/health` and `/ready`.
+  - §12.1: first measurements on Cloud Run.
 
 - **v0.11 (2026-10-21), Phase 7:**
   - Service built: FastAPI API, worker, job model, local and GCP backends (GCS, Firestore, Cloud Tasks), docker compose with emulators.

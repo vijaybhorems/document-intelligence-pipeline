@@ -119,7 +119,7 @@ def test_api_keys_are_enforced_when_set(services: Services) -> None:
     assert client.get("/v1/schema").status_code == 401
     assert client.get("/v1/schema", headers={"X-API-Key": "wrong"}).status_code == 401
     assert client.get("/v1/schema", headers={"X-API-Key": "k2"}).status_code == 200
-    assert client.get("/healthz").status_code == 200  # probes stay open
+    assert client.get("/health").status_code == 200  # probes stay open
 
 
 def test_transient_failure_is_retried_then_marked_failed(services: Services) -> None:
