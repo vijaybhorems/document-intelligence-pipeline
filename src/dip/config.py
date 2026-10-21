@@ -63,6 +63,7 @@ class Settings(BaseSettings):
 
     # Tracing (SPEC §11). Unset = off. Local Phoenix: http://localhost:6006/v1/traces
     otel_endpoint: str | None = None
+    otel_headers: SecretStr | None = None  # "k=v,k=v"; Arize: "space_id=…,api_key=…"
     trace_content: bool = True  # include prompt/response text in spans
 
     @property

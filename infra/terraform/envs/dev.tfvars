@@ -1,0 +1,5 @@
+project_id           = "dip-dev-c7a284e91f63"
+env                  = "dev"
+region               = "us-central1"
+github_repository    = "vijaybhorems/document-intelligence-pipeline"
+github_repository_id = "1426539527"

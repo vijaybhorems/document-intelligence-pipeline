@@ -372,3 +372,12 @@ def test_tracing_is_off_without_an_endpoint() -> None:
     from dip.observability.tracing import configure_tracing
 
     assert configure_tracing(None) is None
+
+
+def test_otlp_headers_split_on_the_first_equals() -> None:
+    from dip.observability.tracing import parse_headers
+
+    assert parse_headers("space_id=U3BhY2U6MTI=, api_key=ak-1,") == {
+        "space_id": "U3BhY2U6MTI=",
+        "api_key": "ak-1",
+    }

@@ -1,0 +1,3 @@
+# Created once by hand: docs/runbook.md, "First deploy" (versioned, uniform access, private).
+bucket = "dip-dev-c7a284e91f63-tfstate"
+prefix = "dip/dev"

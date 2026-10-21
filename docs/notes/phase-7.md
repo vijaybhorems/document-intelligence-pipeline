@@ -7,7 +7,7 @@
 
 - [x] `dip.pipeline.Pipeline`: the one orchestration path, with the decided configuration (D1 hybrid route, D2 luna, D4 single call, D5 prompt v4, D6 validate + one re-ask, D7 warn). It returns a `ContractRecord` with provenance: route, model, prompt version, grounding checked/unavailable, tokens, cost and time. `pipeline_version` names every one of those choices, so a cached record is reused only by an identical pipeline.
 - [x] **API** (`dip.api.app`), [SPEC §12](../SPEC.md#12-interfaces-rest-api-and-mcp):
-  - `POST /v1/extractions` (multipart, `?wait=`, `?force=`, `Idempotency-Key`), `GET /v1/extractions/{id}`, `/record`, `/v1/schema`, `/healthz`, `/readyz`.
+  - `POST /v1/extractions` (multipart, `?wait=`, `?force=`, `Idempotency-Key`), `GET /v1/extractions/{id}`, `/record`, `/v1/schema`, `/health`, `/ready`.
   - The upload is sniffed by content, not filename (PDF or UTF-8 text). The size limit is enforced while reading, and the page count is checked before anything is queued.
   - Errors are RFC 9457 `problem+json`. Auth uses `X-API-Key`, compared in constant time.
 - [x] **Jobs:** `queued → routing → extracting → validating → succeeded | partially_succeeded | failed`. Dedupe is by SHA-256 + pipeline version. Firestore writes are per-field updates, so a redelivered task can't overwrite newer fields.

@@ -59,3 +59,26 @@ def test_inline_queue_redelivers_until_success() -> None:
     q.enqueue("j1")
     q.drain()
     assert calls == ["j1"] * 3
+
+
+def test_cloud_tasks_queue_builds_an_oidc_task_with_a_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from google.cloud import tasks_v2
+
+    created: list[dict] = []
+
+    class FakeClient:
+        def create_task(self, parent: str, task: tasks_v2.Task) -> None:
+            created.append({"parent": parent, "task": task})
+
+    monkeypatch.setattr(tasks_v2, "CloudTasksClient", FakeClient)
+    q = queue.CloudTasksQueue("projects/p/locations/r/queues/q", "https://w.run.app/", "inv@p.iam")
+    q.enqueue("j1")
+
+    task = created[0]["task"]
+    assert created[0]["parent"] == "projects/p/locations/r/queues/q"
+    assert task.http_request.url == "https://w.run.app/internal/process"
+    assert task.http_request.oidc_token.service_account_email == "inv@p.iam"
+    assert task.http_request.oidc_token.audience == "https://w.run.app"
+    assert task.dispatch_deadline.total_seconds() == 900

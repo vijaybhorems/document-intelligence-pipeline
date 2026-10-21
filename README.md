@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 7 (service) complete: upload a contract to a FastAPI service, poll the job, and fetch a validated record, locally or in docker compose with GCP emulators. The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
+Phase 8 (cloud deploy) complete: the service runs on Google Cloud Run in a dev project, built with Terraform and deployed from GitHub Actions without stored keys. Upload a contract, poll the job, and fetch a validated record, against the live URL, in docker compose with GCP emulators, or locally. The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
 
 ## Quickstart
 
@@ -104,6 +104,23 @@ curl -H 'X-API-Key: local-dev-key' localhost:8080/v1/extractions/<job_id>/record
 ```
 
 Interactive docs are at <http://localhost:8080/docs>, and traces at <http://localhost:6006> (Phoenix).
+
+## Deployment (Phase 8)
+
+```text
+client ──X-API-Key──▶ dip-api (Cloud Run, public) ──▶ GCS raw/ · Firestore job · Cloud Tasks
+                                                                         │ OIDC
+                          dip-worker (Cloud Run, internal) ◀─────────────┘
+                            ──▶ OpenAI · GCS records/ · Firestore · Arize traces
+```
+
+- **Infrastructure:** [`infra/terraform`](infra/terraform), applied by a person ([ADR I10](docs/adr/I10-deploy-responsibility.md)).
+- **Deploys:** every merge to `main` builds the image and rolls it out ([`deploy.yml`](.github/workflows/deploy.yml)). GitHub authenticates through Workload Identity Federation, so there are no service-account keys.
+- **Operations:** first deploy, rollback, key rotation and incidents are in the [runbook](docs/runbook.md).
+
+```bash
+uv run dip submit contract.pdf --api "$(terraform -chdir=infra/terraform output -raw api_url)"   # key: DIP_API_KEY in .env
+```
 
 ## Configuration
 

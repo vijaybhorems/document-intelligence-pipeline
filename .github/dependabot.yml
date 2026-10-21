@@ -23,3 +23,8 @@ updates:
     directory: /docker
     schedule:
       interval: weekly
+
+  - package-ecosystem: terraform
+    directory: /infra/terraform
+    schedule:
+      interval: weekly

@@ -16,7 +16,7 @@ import hashlib
 import time
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import openai
 from openai import AsyncOpenAI
@@ -28,10 +28,14 @@ from pydantic import BaseModel
 from dip.extract import prompts
 from dip.extract.convert import to_domain
 from dip.extract.pricing import PRICES_AS_OF, cost_usd, price_of
-from dip.extract.retrieval import Retriever
 from dip.extract.system import SystemOutput, Usage
 from dip.schema.llm import LLMField, output_model
 from dip.schema.registry import FIELDS, FieldGroup, FieldSpec
+
+if TYPE_CHECKING:
+    # LlamaIndex costs ~40% of the service's import time (Cloud Run cold start) and only
+    # the retrieval experiment (D3) uses it, so it is imported where it's built.
+    from dip.extract.retrieval import Retriever
 
 MAX_OUTPUT_TOKENS_BASE = 4_000
 _tracer = trace.get_tracer("dip.extract")
@@ -86,7 +90,7 @@ class OpenAIExtractor:
         reasoning_effort: str = "low",
         prompt_version: str = prompts.CURRENT_VERSION,
         shared_schema: bool = True,
-        retriever: Retriever | None = None,
+        retriever: "Retriever | None" = None,
         max_concurrency: int = 8,
         timeout_s: float = 180.0,
         api_key: str | None = None,

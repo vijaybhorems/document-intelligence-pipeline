@@ -283,10 +283,10 @@ def _retriever(context: str, api_key: str) -> "Retriever | None":
 
 
 def _start_tracing() -> None:
-    from dip.observability.tracing import configure_tracing
+    from dip.observability.tracing import start_tracing
 
     settings = get_settings()
-    if configure_tracing(settings.otel_endpoint, settings.trace_content):
+    if start_tracing(settings):
         typer.echo(f"tracing to {settings.otel_endpoint}")
 
 
@@ -631,7 +631,8 @@ def submit(
     files: Annotated[list[Path], typer.Argument(help="PDF or .txt contracts to upload.")],
     api: Annotated[str, typer.Option(help="Service base URL.")] = "http://localhost:8080",
     api_key: Annotated[
-        str | None, typer.Option(envvar="DIP_API_KEY", help="X-API-Key, if the service needs one.")
+        str | None,
+        typer.Option(envvar="DIP_API_KEY", help="X-API-Key (default: DIP_API_KEY, env or .env)."),
     ] = None,
     force: Annotated[bool, typer.Option(help="Re-extract even if already done.")] = False,
     out: Annotated[Path | None, typer.Option(help="Directory to save each record as JSON.")] = None,
@@ -643,6 +644,10 @@ def submit(
 
     from dip.service.client import submit as submit_one
 
+    if api_key is None:  # like Settings: the environment first, then .env
+        from dotenv import dotenv_values
+
+        api_key = dotenv_values(".env").get("DIP_API_KEY")
     headers = {"X-API-Key": api_key} if api_key else {}
     total = 0.0
     with httpx.Client(base_url=api, headers=headers, timeout=60) as client:

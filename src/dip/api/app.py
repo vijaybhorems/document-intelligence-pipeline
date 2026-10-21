@@ -64,13 +64,13 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise HTTPException(409, f"job is {job.status.value}; poll the status URL")
         return ContractRecord.model_validate_json(svc.blobs.get(job.record_key))
 
-    @app.get("/healthz", include_in_schema=False)
-    def healthz() -> dict[str, str]:
+    @app.get("/health", include_in_schema=False)
+    def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/readyz", include_in_schema=False)
-    def readyz() -> dict[str, str]:
-        svc.blobs.exists("readyz-probe")  # touches storage; raises if unreachable
+    @app.get("/ready", include_in_schema=False)
+    def ready() -> dict[str, str]:
+        svc.blobs.exists("ready-probe")  # touches storage; raises if unreachable
         return {"status": "ready", "backend": svc.settings.backend}
 
     @app.get("/v1/schema", dependencies=auth)
