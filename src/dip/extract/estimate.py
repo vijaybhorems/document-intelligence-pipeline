@@ -23,8 +23,9 @@ OUTPUT_TOKENS_PER_CALL = 250
 OUTPUT_TOKENS_PER_FIELD = 45
 OUTPUT_TOKENS_PER_NULL_FIELD = 4  # shared schema: `"field": null` for fields outside the call
 # Multimodal route: OpenAI sends each PDF page as an image (plus its text layer, if
-# any). Calibrated on the Phase 6 probe (1-page contract, gpt-5.6-luna): ~6,700/page.
-INPUT_TOKENS_PER_PDF_PAGE = 6_700
+# any). Measured on the Phase 6 experiment runs (gpt-5.6-luna): median ~1,600 tokens
+# per clean page, ~3,200 per scanned page. The higher figure keeps estimates safe.
+INPUT_TOKENS_PER_PDF_PAGE = 3_300
 
 
 @dataclass(frozen=True)
