@@ -11,6 +11,7 @@ Everything is seeded by doc_id, so the scans regenerate identically.
 import hashlib
 import io
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,7 @@ DPI = 150
 MAX_ROTATION_DEG = 0.8
 NOISE_STD = 6.0  # grey levels
 JPEG_QUALITY = 60
+_FIXED_DATE = time.gmtime(946_684_800)  # 2000-01-01; Pillow wants a struct_time
 
 
 def _seed(doc_id: str) -> int:
@@ -56,7 +58,16 @@ def make_scan(pdf_bytes: bytes, doc_id: str) -> bytes:
     finally:
         document.close()
     out = io.BytesIO()
-    pages[0].save(out, format="PDF", save_all=True, append_images=pages[1:], resolution=DPI)
+    pages[0].save(
+        out,
+        format="PDF",
+        save_all=True,
+        append_images=pages[1:],
+        resolution=DPI,
+        # Pillow stamps the current time otherwise, so two runs straddling a second differ.
+        creationDate=_FIXED_DATE,
+        modDate=_FIXED_DATE,
+    )
     return out.getvalue()
 
 
