@@ -80,27 +80,37 @@ def _validate_field(
 
 def validate(
     fields: ContractFields,
-    text: str,
+    text: str | None,
     policy: Policy,
     threshold: float = DEFAULT_THRESHOLD,
     enforce_rules: bool = False,
 ) -> Validated:
     """Ground evidence, apply ``policy``, then check consistency rules.
 
+    ``text=None`` means there is no source text to ground against (a scan read
+    multimodally). Grounding is then *unavailable*: evidence keeps
+    ``grounded=None`` rather than passing as grounded, and only the consistency
+    rules run (SPEC §6.2).
+
     ``enforce_rules`` also drops dependent clauses that rules flag (for example a
     competitive-restriction exception with no restriction to be an exception to).
     """
-    source = SourceText(text, threshold)
-    typed: dict[str, FieldValue] = {}
-    clauses: dict[str, FieldValue] = {}
     issues: list[ValidationIssue] = []
-    for spec in FIELDS:
-        new, field_issues = _validate_field(spec.name, field_of(fields, spec.name), source, policy)
-        issues += field_issues
-        (clauses if spec.field_type is FieldType.CLAUSE else typed)[spec.name] = new
-    validated = ContractFields.model_validate(
-        {**typed, "clauses": fields.clauses.model_validate(clauses)}
-    )
+    if text is None:
+        validated = fields
+    else:
+        source = SourceText(text, threshold)
+        typed: dict[str, FieldValue] = {}
+        clauses: dict[str, FieldValue] = {}
+        for spec in FIELDS:
+            new, field_issues = _validate_field(
+                spec.name, field_of(fields, spec.name), source, policy
+            )
+            issues += field_issues
+            (clauses if spec.field_type is FieldType.CLAUSE else typed)[spec.name] = new
+        validated = ContractFields.model_validate(
+            {**typed, "clauses": fields.clauses.model_validate(clauses)}
+        )
     rule_issues = rules.check(validated)
     if enforce_rules:
         dropped = {i.field for i in rule_issues if i.code in rules.ENFORCEABLE}

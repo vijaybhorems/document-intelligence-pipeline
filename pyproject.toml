@@ -7,6 +7,11 @@ authors = [{ name = "Vijay Bhore", email = "bhore.vijay@gmail.com" }]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "duckdb>=1.5.6",
+    "fastapi>=0.156.4",
+    "google-auth>=2.62.0",
+    "google-cloud-firestore>=2.34.1",
+    "google-cloud-storage>=3.17.1",
+    "google-cloud-tasks>=2.26.0",
     "httpx>=0.28.1",
     "llama-index-core>=0.14.25",
     "llama-index-embeddings-openai>=0.7.0",
@@ -20,9 +25,12 @@ dependencies = [
     "pydantic-settings>=2.16.0",
     "pypdf>=6.21.1",
     "pypdfium2>=5.14.0",
+    "python-multipart>=0.0.32",
     "rapidfuzz>=3.14.6",
+    "structlog>=26.1.0",
     "tiktoken>=0.14.0",
     "typer>=0.19",  # docling caps typer<0.27 (its CLI extra); nothing here needs newer
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [project.scripts]

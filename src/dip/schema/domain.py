@@ -236,3 +236,32 @@ def field_of(fields: ContractFields, name: str) -> FieldValue:
     if name in ContractFields.model_fields:
         return getattr(fields, name)
     return getattr(fields.clauses, name)
+
+
+# ── What the API returns (SPEC §4.3) ─────────────────────────────────────────
+
+
+class Provenance(_Model):
+    """Everything needed to reproduce, cost and debug one record."""
+
+    pipeline_version: str  # schema + prompt + model + route rules
+    route: str  # "text" (pypdf/txt) or "multimodal"
+    model: str
+    prompt_version: str
+    pages: int | None = None
+    grounding: Literal["checked", "unavailable"] = "checked"  # unavailable: scan, no text layer
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    seconds: float = 0.0
+
+
+class ContractRecord(_Model):
+    record_id: str
+    document_sha256: str
+    schema_version: str = SCHEMA_VERSION
+    created_at: dt.datetime
+    provenance: Provenance
+    fields: ContractFields
+    validation_issues: list[ValidationIssue] = []
+    extraction_issues: list[str] = []
