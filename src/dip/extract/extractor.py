@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from dip.extract import prompts
 from dip.extract.convert import to_domain
 from dip.extract.pricing import PRICES_AS_OF, cost_usd, price_of
+from dip.extract.retrieval import Retriever
 from dip.extract.system import SystemOutput, Usage
 from dip.schema.llm import LLMField, output_model
 from dip.schema.registry import FIELDS, FieldGroup, FieldSpec
@@ -84,6 +85,7 @@ class OpenAIExtractor:
         reasoning_effort: str = "low",
         prompt_version: str = prompts.CURRENT_VERSION,
         shared_schema: bool = True,
+        retriever: Retriever | None = None,
         max_concurrency: int = 8,
         timeout_s: float = 180.0,
         api_key: str | None = None,
@@ -94,6 +96,7 @@ class OpenAIExtractor:
         self.strategy = strategy
         self.reasoning_effort = reasoning_effort
         self.prompt_version = prompt_version
+        self.retriever = retriever  # None = send the full contract (decision D3)
         # One schema for every call lets OpenAI cache [schema + system + contract].
         self.shared_schema = shared_schema and strategy is not Strategy.SINGLE
         self.max_concurrency = max_concurrency
@@ -109,7 +112,9 @@ class OpenAIExtractor:
     @property
     def name(self) -> str:
         suffix = "" if self.shared_schema or self.strategy is Strategy.SINGLE else "-own_schema"
-        return f"llm-{self.model}-{self.strategy.value}{suffix}"
+        version = "" if self.prompt_version == "v1" else f"-{self.prompt_version}"
+        context = "-retrieved" if self.retriever else ""
+        return f"llm-{self.model}-{self.strategy.value}{suffix}{version}{context}"
 
     def config(self) -> dict[str, Any]:
         return {
@@ -118,6 +123,8 @@ class OpenAIExtractor:
             "calls_per_contract": len(self._plan),
             "reasoning_effort": self.reasoning_effort,
             "shared_schema": self.shared_schema,
+            "context": "retrieved" if self.retriever else "full",
+            **({"retrieval_top_k": self.retriever.top_k} if self.retriever else {}),
             "prompt_version": self.prompt_version,
             "prices_as_of": PRICES_AS_OF,
         }
@@ -146,6 +153,11 @@ class OpenAIExtractor:
         contracts = asyncio.Semaphore(max(1, self.max_concurrency // 2))
         budget = _Budget(max_cost_usd, on_usage)
         results: dict[str, SystemOutput] = {}
+        if self.retriever is not None:
+            all_specs = [s for _, specs, _ in self._plan for s in specs]
+            await asyncio.to_thread(
+                self.retriever.prepare_queries, all_specs, self.prompt_version, budget.record
+            )
 
         async def one(doc_id: str, text: str) -> None:
             async with contracts:
@@ -184,13 +196,35 @@ class OpenAIExtractor:
     ) -> SystemOutput:
         started = time.perf_counter()
         cache_key = "dip-" + hashlib.sha256(text.encode()).hexdigest()[:24]
+        excerpts = None
+        retrieval_usage = Usage()
+        if self.retriever is not None:
+            specs = [s for _, call_specs, _ in self._plan for s in call_specs]
+            found = await asyncio.to_thread(
+                self.retriever.excerpts, text, specs, self.prompt_version
+            )
+            budget.record(found.usage)
+            retrieval_usage = found.usage
+            excerpts = found.text
+            trace.get_current_span().set_attributes(
+                {
+                    "dip.chunks_kept": found.chunks_kept,
+                    "dip.chunks_total": found.chunks_total,
+                    "dip.excerpt_chars": len(found.text),
+                }
+            )
         first, *rest = self._plan
-        outcomes = [await self._call(client, calls, budget, text, cache_key, *first)]
+        outcomes = [
+            await self._call(client, calls, budget, text, cache_key, *first, excerpts=excerpts)
+        ]
         outcomes += await asyncio.gather(
-            *(self._call(client, calls, budget, text, cache_key, *call) for call in rest)
+            *(
+                self._call(client, calls, budget, text, cache_key, *call, excerpts=excerpts)
+                for call in rest
+            )
         )
         outputs: dict[str, LLMField] = {}
-        usage = Usage()
+        usage = retrieval_usage
         issues: list[str] = []
         for fields_out, call_usage, call_issues in outcomes:
             outputs.update(fields_out)
@@ -212,6 +246,7 @@ class OpenAIExtractor:
         model_cls: type[BaseModel],
         feedback: str | None = None,
         shared_schema: bool | None = None,
+        excerpts: str | None = None,
     ) -> tuple[dict[str, LLMField], Usage, list[str]]:
         shared = self.shared_schema if shared_schema is None else shared_schema
         max_tokens = min(
@@ -229,7 +264,12 @@ class OpenAIExtractor:
                                 "role": "system",
                                 "content": prompts.system_prompt(self.prompt_version),
                             },
-                            {"role": "user", "content": prompts.contract_message(text)},
+                            *(
+                                {"role": "user", "content": m}
+                                for m in prompts.context_messages(
+                                    text, self.prompt_version, excerpts
+                                )
+                            ),
                             {
                                 "role": "user",
                                 "content": prompts.fields_prompt(

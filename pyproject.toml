@@ -8,6 +8,8 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "duckdb>=1.5.6",
     "httpx>=0.28.1",
+    "llama-index-core>=0.14.25",
+    "llama-index-embeddings-openai>=0.7.0",
     "openai>=3.35.1",
     "openinference-instrumentation-openai>=0.1.65",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
