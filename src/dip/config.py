@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     tasks_invoker_email: str | None = None  # the service account Cloud Tasks signs as
     api_keys: SecretStr | None = None  # comma-separated; unset = auth off (local only)
     internal_token: SecretStr | None = None  # local shared secret for /internal/*
+    duckdb_extension_dir: str | None = None  # baked into the image (httpfs); None: DuckDB's default
+    max_queued_jobs: int = 200  # backpressure: above this, uploads get 429 (0 = no limit)
     max_upload_mb: int = 25
     max_pages: int = 300
     wait_max_seconds: float = 60.0

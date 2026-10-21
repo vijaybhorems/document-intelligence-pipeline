@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 8 (cloud deploy) complete: the service runs on Google Cloud Run in a dev project, built with Terraform and deployed from GitHub Actions without stored keys. Upload a contract, poll the job, and fetch a validated record, against the live URL, in docker compose with GCP emulators, or locally. The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
+Phase 9 (analytics & hardening) complete. The service runs on Google Cloud Run (dev), built with Terraform and deployed from GitHub Actions without stored keys. Records are compacted hourly into a Parquet lake that DuckDB queries straight from GCS, behind whitelisted `/v1/analytics` queries. Load-tested with 50 contracts: p95 63 s end to end for a ~20-page contract, 160 ms for status calls, $0.0061 median per contract, 50/50 succeeded ([numbers](docs/SPEC.md#121-non-functional-targets-measured)). The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
 
 ## Quickstart
 
@@ -31,6 +31,7 @@ uv run dip --help
 | `make check` | Everything CI runs |
 | `make up` / `make down` | Start / stop the service stack (docker compose) |
 | `make e2e` | One contract through the running stack |
+| `make loadtest` | 50 contracts against the deployed API, with Locust |
 
 ## Google Cloud setup (one-time)
 
@@ -121,6 +122,27 @@ client ──X-API-Key──▶ dip-api (Cloud Run, public) ──▶ GCS raw/ �
 ```bash
 uv run dip submit contract.pdf --api "$(terraform -chdir=infra/terraform output -raw api_url)"   # key: DIP_API_KEY in .env
 ```
+
+## Analytics (Phase 9)
+
+`dip-compactor` turns `records/*.json` into Parquet tables (`records`, `record_fields`) every hour. `GET /v1/analytics/{name}` runs one of a fixed set of queries over them. The API never accepts SQL.
+
+```bash
+curl -H "X-API-Key: $DIP_API_KEY" "$API/v1/analytics"                                 # the queries and their parameters
+curl -H "X-API-Key: $DIP_API_KEY" "$API/v1/analytics/clause_prevalence?min_contracts=3"
+uv run dip lake-push-evals --bucket dip-dev-c7a284e91f63-docs                          # eval runs -> lake/eval/
+uv run dip query eval_by_route_model split=experiment                                   # same queries, from the CLI
+```
+
+| Query | Answers |
+|---|---|
+| `clause_prevalence` | which clauses each contract type contains |
+| `governing_law` | governing-law distribution |
+| `production_by_route` | service cost and latency by route and model |
+| `eval_by_route_model` | eval F1, cost and latency by route, model, prompt and strategy (D1–D5 tables) |
+| `field_regressions` | fields whose F1 dropped between two eval runs |
+
+**Load test:** `make loadtest`, which runs 50 train contracts, costs ~$0.45 and is capped at $1.50.
 
 ## Configuration
 

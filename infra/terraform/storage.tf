@@ -34,6 +34,21 @@ resource "google_firestore_database" "default" {
   depends_on = [google_project_service.this]
 }
 
+# The sweeper's query: status == X and updated_at < T (dip.service.jobs.find_stale).
+resource "google_firestore_index" "jobs_by_status_and_age" {
+  database   = google_firestore_database.default.name
+  collection = "jobs"
+
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "updated_at"
+    order      = "ASCENDING"
+  }
+}
+
 resource "google_artifact_registry_repository" "images" {
   repository_id = "dip"
   location      = var.region

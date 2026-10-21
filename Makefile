@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
-.PHONY: help install fmt lint typecheck test check hooks clean up down logs e2e
+.PHONY: help install fmt lint typecheck test check hooks clean up down logs e2e loadtest
 
 help: ## List targets
-	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{gsub(/\$$\$$/, "$$", $$2); printf "  %-10s %s\n", $$1, $$2}'
 
 install: ## Create .venv, install locked deps (+ optional Docling), install git hooks
 	uv sync --locked --extra docling
@@ -42,6 +42,11 @@ logs: ## Follow API and worker logs
 
 e2e: ## Upload a contract to the running stack, poll, fetch the record (~$$0.01)
 	uv run dip submit "$(E2E_PDF)" --api http://localhost:8080 --api-key "$${DIP_API_KEYS:-local-dev-key}"
+
+loadtest: ## 50 contracts against the deployed dev API, ~$$0.45, capped at $$1.50
+	uv run python loadtest/prepare.py
+	uv run locust -f loadtest/locustfile.py --headless -u 10 -r 1 --run-time 30m \
+		--host "$$(terraform -chdir=infra/terraform output -raw api_url)" --csv data/loadtest/locust --only-summary
 
 clean: ## Remove caches
 	rm -rf .ruff_cache .pytest_cache .coverage htmlcov

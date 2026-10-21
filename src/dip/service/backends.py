@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from dip.analytics.queries import GoogleToken, Lake
 from dip.config import Settings
 from dip.extract.extractor import OpenAIExtractor, Strategy
 from dip.pipeline import Pipeline
@@ -18,6 +19,7 @@ class Services:
     jobs: JobStore
     blobs: BlobStore
     pipeline: Pipeline
+    lake: Lake
     queue: TaskQueue = field(init=False)
 
     def process(self, job_id: str) -> None:
@@ -38,20 +40,49 @@ def default_pipeline(settings: Settings) -> Pipeline:
     return Pipeline(extractor, reask=True)
 
 
+def build_blobs(settings: Settings) -> BlobStore:
+    if settings.backend == "local":
+        return LocalBlobStore(settings.service_dir)
+    if settings.backend == "gcp":
+        if not settings.gcs_bucket:
+            raise ValueError("DIP_GCS_BUCKET is required for the gcp backend")
+        return GcsBlobStore(settings.gcs_bucket)
+    raise ValueError(f"unknown backend {settings.backend!r}")
+
+
+def build_jobs(settings: Settings) -> JobStore:
+    if settings.backend == "gcp":
+        return FirestoreJobStore(settings.firestore_collection)
+    return MemoryJobStore()
+
+
+def build_lake(settings: Settings, blobs: BlobStore) -> Lake:
+    if settings.backend == "gcp":
+        return Lake(
+            f"gs://{settings.gcs_bucket}/lake",
+            blobs,
+            token=GoogleToken(),
+            extension_dir=settings.duckdb_extension_dir,
+        )
+    return Lake(str(settings.service_dir.resolve() / "lake"), blobs)
+
+
+def build_queue(settings: Settings, jobs: JobStore, blobs: BlobStore) -> TaskQueue:
+    """The queue alone (the sweeper): the inline queue gets a pipeline only if it runs jobs."""
+
+    def process(job_id: str) -> None:
+        process_job(job_id, jobs, blobs, default_pipeline(settings))
+
+    return _queue(settings, process)
+
+
 def build_services(
     settings: Settings, pipeline: Pipeline | None = None, queue: TaskQueue | None = None
 ) -> Services:
-    if settings.backend == "local":
-        jobs: JobStore = MemoryJobStore()
-        blobs: BlobStore = LocalBlobStore(settings.service_dir)
-    elif settings.backend == "gcp":
-        if not settings.gcs_bucket:
-            raise ValueError("DIP_GCS_BUCKET is required for the gcp backend")
-        jobs = FirestoreJobStore(settings.firestore_collection)
-        blobs = GcsBlobStore(settings.gcs_bucket)
-    else:
-        raise ValueError(f"unknown backend {settings.backend!r}")
-    services = Services(settings, jobs, blobs, pipeline or default_pipeline(settings))
+    blobs = build_blobs(settings)
+    jobs = build_jobs(settings)
+    lake = build_lake(settings, blobs)
+    services = Services(settings, jobs, blobs, pipeline or default_pipeline(settings), lake)
     services.queue = queue or _queue(settings, services.process)
     return services
 

@@ -86,7 +86,7 @@ select = [
 
 # ---------------------------------------------------------------- pyright
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "loadtest"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
@@ -108,6 +108,7 @@ branch = true
 
 [dependency-groups]
 dev = [
+    "locust>=2.40",
     "matplotlib>=3.11.2",
     "pre-commit>=4.7.0",
     "pyright[nodejs]>=1.1.414",

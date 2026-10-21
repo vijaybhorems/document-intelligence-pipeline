@@ -68,6 +68,23 @@ variable "tasks_max_per_second" {
   default = 1
 }
 
+variable "alert_emails" {
+  type        = list(string)
+  description = "Who gets alert emails. Set in a gitignored *.auto.tfvars, not in the public repo."
+  default     = []
+}
+
+variable "compact_schedule" {
+  type        = string
+  description = "Cron for dip-compactor (UTC). Hourly: analytics lag records by at most an hour."
+  default     = "5 * * * *"
+}
+
+variable "sweep_schedule" {
+  type    = string
+  default = "*/10 * * * *"
+}
+
 variable "raw_retention_days" {
   type        = number
   description = "Delete uploaded documents after this many days. Records are kept."

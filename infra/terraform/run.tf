@@ -45,8 +45,8 @@ resource "google_cloud_run_v2_service" "api" {
       image = var.image
 
       resources {
-        limits            = { cpu = "1", memory = "512Mi" }
-        cpu_idle          = true # billed only while handling requests
+        limits            = { cpu = "1", memory = "1Gi" } # DuckDB for /v1/analytics
+        cpu_idle          = true                          # billed only while handling requests
         startup_cpu_boost = true
       }
 

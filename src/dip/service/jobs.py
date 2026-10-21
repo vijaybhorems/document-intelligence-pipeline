@@ -41,6 +41,7 @@ class Job(BaseModel):
     pipeline_version: str
     idempotency_key: str | None = None
     attempts: int = 0
+    sweeps: int = 0  # times the sweeper re-sent this job (dip.service.sweeper)
     record_key: str | None = None
     record_id: str | None = None
     cost_usd: float | None = None
@@ -61,6 +62,15 @@ class JobStore(Protocol):
         ...
 
     def find_by_idempotency_key(self, key: str) -> Job | None: ...
+
+    def find_stale(self, before: dt.datetime, limit: int = 100) -> list[Job]:
+        """Unfinished jobs not updated since ``before`` (oldest first)."""
+        ...
+
+    def count_queued(self) -> int: ...
+
+
+ACTIVE = (JobStatus.QUEUED, JobStatus.ROUTING, JobStatus.EXTRACTING, JobStatus.VALIDATING)
 
 
 class MemoryJobStore:
@@ -100,6 +110,15 @@ class MemoryJobStore:
     def find_by_idempotency_key(self, key: str) -> Job | None:
         with self._lock:
             return next((j for j in self._jobs.values() if j.idempotency_key == key), None)
+
+    def find_stale(self, before: dt.datetime, limit: int = 100) -> list[Job]:
+        with self._lock:
+            stale = [j for j in self._jobs.values() if j.status in ACTIVE and j.updated_at < before]
+        return sorted(stale, key=lambda j: j.updated_at)[:limit]
+
+    def count_queued(self) -> int:
+        with self._lock:
+            return sum(j.status is JobStatus.QUEUED for j in self._jobs.values())
 
 
 class FirestoreJobStore:
@@ -154,3 +173,29 @@ class FirestoreJobStore:
             .stream()
         )
         return Job.model_validate(docs[0].to_dict()) if docs else None
+
+    def find_stale(self, before: dt.datetime, limit: int = 100) -> list[Job]:
+        # status == X and updated_at < T: needs the composite index (status, updated_at)
+        # in infra/terraform/storage.tf. Timestamps are stored as ISO-8601 UTC strings,
+        # which sort like the instants they name (to the second).
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        cutoff = before.astimezone(dt.UTC).isoformat().replace("+00:00", "Z")
+        found: list[Job] = []
+        for status in ACTIVE:
+            query = (
+                self._collection.where(filter=FieldFilter("status", "==", status.value))
+                .where(filter=FieldFilter("updated_at", "<", cutoff))
+                .order_by("updated_at")
+                .limit(limit)
+            )
+            found += [Job.model_validate(d.to_dict()) for d in query.stream()]
+        return sorted(found, key=lambda j: j.updated_at)[:limit]
+
+    def count_queued(self) -> int:
+        # An aggregation query: billed as one read per 1,000 index entries, not per job.
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        query = self._collection.where(filter=FieldFilter("status", "==", JobStatus.QUEUED.value))
+        (result,) = query.count().get()
+        return int(result[0].value)

@@ -17,6 +17,17 @@ if TYPE_CHECKING:
 app = typer.Typer(help="Document intelligence pipeline.", no_args_is_help=True)
 
 
+@app.callback()
+def _configure() -> None:
+    """Logs as the services do: JSON outside local, so Cloud Run Jobs (compact, sweep) emit
+    the structured events the log-based alert metrics match on (infra/terraform/alerts.tf)."""
+    from dip.config import Environment
+    from dip.observability.logging import configure_logging
+
+    settings = get_settings()
+    configure_logging(settings.log_level, json=settings.env is not Environment.LOCAL)
+
+
 def _paths() -> dict[str, Path]:
     data = get_settings().data_dir
     return {
@@ -669,6 +680,82 @@ def submit(
                 out.mkdir(parents=True, exist_ok=True)
                 (out / f"{record.record_id}.json").write_text(record.model_dump_json(indent=2))
     typer.echo(f"total ${total:.4f}")
+
+
+# ── Phase 9: lake, analytics, operations ─────────────────────────────────────
+
+
+@app.command()
+def compact(
+    force: Annotated[bool, typer.Option(help="Rebuild every partition.")] = False,
+) -> None:
+    """Compact JSON records into the lake's Parquet tables (Cloud Run Job dip-compactor)."""
+    from dip.analytics.lake import compact as run_compaction
+    from dip.service.backends import build_blobs
+
+    report = run_compaction(build_blobs(get_settings()), force=force)
+    typer.echo(
+        f"rebuilt {len(report.partitions_rebuilt)} partition(s) ({report.records} records), "
+        f"{report.partitions_current} already current"
+    )
+
+
+@app.command()
+def sweep(
+    stale_after_min: Annotated[int, typer.Option(help="Idle minutes before a job is stale.")] = 35,
+) -> None:
+    """Re-send stranded jobs (Cloud Run Job dip-sweeper)."""
+    import datetime as dt
+
+    from dip.service.backends import build_blobs, build_jobs, build_queue
+    from dip.service.sweeper import sweep as run_sweep
+
+    settings = get_settings()
+    jobs, blobs = build_jobs(settings), build_blobs(settings)
+    report = run_sweep(
+        jobs, build_queue(settings, jobs, blobs), dt.timedelta(minutes=stale_after_min)
+    )
+    typer.echo(f"requeued {len(report.requeued)}, failed {len(report.failed)}")
+
+
+@app.command("lake-push-evals")
+def lake_push_evals(
+    bucket: Annotated[
+        str | None, typer.Option(help="GCS bucket; default: the configured backend.")
+    ] = None,
+) -> None:
+    """Publish local eval runs (data/runs) to the lake, for the eval_* analytics queries."""
+    from dip.analytics.lake import push_evals
+    from dip.service.backends import build_blobs
+    from dip.service.blobs import BlobStore, GcsBlobStore
+
+    blobs: BlobStore = GcsBlobStore(bucket) if bucket else build_blobs(get_settings())
+    runs, uploaded = push_evals(_paths()["runs"], blobs)
+    typer.echo(f"{runs} runs in lake/eval/runs.parquet; {uploaded} new result file(s)")
+
+
+@app.command()
+def query(
+    name: Annotated[str, typer.Argument(help="Query name; `dip query list` shows them.")],
+    params: Annotated[list[str] | None, typer.Argument(help="key=value parameters.")] = None,
+) -> None:
+    """Run a named analytics query against the configured lake (local or GCS)."""
+    from dip.analytics.queries import QUERIES
+    from dip.service.backends import build_blobs, build_lake
+
+    if name == "list":
+        for q in QUERIES.values():
+            args = " ".join(
+                f"{p.name}={p.default if p.default is not None else '…'}" for p in q.params
+            )
+            typer.echo(f"{q.name:22s} {args:40s} {q.description}")
+        return
+    settings = get_settings()
+    raw = dict(p.split("=", 1) for p in params or [])
+    result = build_lake(settings, build_blobs(settings)).run(name, raw)
+    typer.echo("\t".join(result.columns))
+    for row in result.rows:
+        typer.echo("\t".join("" if v is None else str(v) for v in row.values()))
 
 
 if __name__ == "__main__":

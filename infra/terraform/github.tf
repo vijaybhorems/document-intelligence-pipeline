@@ -46,8 +46,8 @@ resource "google_service_account_iam_member" "github_impersonates_deployer" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${var.github_repository_id}"
 }
 
-# What a deploy needs, and no more: push to this one repository, update these two
-# services, and run their revisions as their own service accounts. No Terraform, no IAM.
+# What a deploy needs, and no more: push to this one repository, update the two
+# services and two jobs, and run them as their own service accounts. No Terraform, no IAM.
 resource "google_artifact_registry_repository_iam_member" "deployer_pushes" {
   repository = google_artifact_registry_repository.images.name
   location   = var.region
@@ -67,10 +67,21 @@ resource "google_cloud_run_v2_service_iam_member" "deployer_updates" {
   member   = google_service_account.deployer.member
 }
 
+resource "google_cloud_run_v2_job_iam_member" "deployer_updates" {
+  for_each = google_cloud_run_v2_job.this
+
+  name     = each.value.name
+  location = var.region
+  role     = "roles/run.developer"
+  member   = google_service_account.deployer.member
+}
+
 resource "google_service_account_iam_member" "deployer_acts_as" {
   for_each = {
-    api    = google_service_account.api.name
-    worker = google_service_account.worker.name
+    api       = google_service_account.api.name
+    worker    = google_service_account.worker.name
+    compactor = google_service_account.compactor.name
+    sweeper   = google_service_account.sweeper.name
   }
 
   service_account_id = each.value
