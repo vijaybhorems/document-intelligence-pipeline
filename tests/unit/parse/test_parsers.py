@@ -53,3 +53,10 @@ def test_parse_cache_parses_once_per_content_and_version(tmp_path: Path) -> None
         == cache_path(tmp_path, PDF, parser).parent.name
     )
     assert parser.version in cache_path(tmp_path, PDF, parser).name
+
+
+def test_text_layer_chars_tells_born_digital_from_scanned() -> None:
+    from dip.parse.docling_parser import MIN_LAYER_CHARS, _text_layer_chars
+
+    assert all(n >= MIN_LAYER_CHARS for n in _text_layer_chars(PDF))
+    assert all(n < MIN_LAYER_CHARS for n in _text_layer_chars(make_scan(PDF, "doc-1")))

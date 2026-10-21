@@ -20,6 +20,24 @@ from dip.parse.base import PageSpan, ParsedDocument
 OCR_ENGINE = "rapidocr"
 
 
+MIN_LAYER_CHARS = 20
+
+
+def _text_layer_chars(data: bytes) -> list[int]:
+    """Characters in each page's embedded text layer (0 for a scanned page)."""
+    import pypdfium2 as pdfium
+
+    document = pdfium.PdfDocument(data)
+    try:
+        return [len(page.get_textpage().get_text_range().strip()) for page in document]
+    finally:
+        document.close()
+
+
+class ParseError(RuntimeError):
+    """Docling reported errors. Raised so a broken parse is never cached as if it were real."""
+
+
 class DoclingParser:
     name = "docling"
     version = f"{version('docling')}+{OCR_ENGINE}"
@@ -40,7 +58,13 @@ class DoclingParser:
         from docling.datamodel.base_models import DocumentStream
 
         started = time.perf_counter()
-        result = self._converter.convert(DocumentStream(name=filename, stream=io.BytesIO(data)))
+        result = self._converter.convert(
+            DocumentStream(name=filename, stream=io.BytesIO(data)), raises_on_error=False
+        )
+        if result.errors:
+            # e.g. "onnxruntime is not installed": OCR silently skipped, text missing.
+            messages = sorted({str(getattr(e, "error_message", e)) for e in result.errors})
+            raise ParseError(f"{filename}: {'; '.join(messages)[:300]}")
         document = result.document
         parts: list[str] = []
         pages: list[PageSpan] = []
@@ -50,10 +74,12 @@ class DoclingParser:
             pages.append(PageSpan(page=page_no, start=offset, end=offset + len(text)))
             parts.append(text)
             offset += len(text) + 2
+        # OCR happened if a page produced text although its PDF text layer is (nearly) empty.
+        layer = _text_layer_chars(data)
         ocr_used = any(
-            getattr(cell, "from_ocr", False)
-            for page in result.pages
-            for cell in (page.cells if page.cells else [])
+            layer[span.page - 1] < MIN_LAYER_CHARS and span.end > span.start
+            for span in pages
+            if span.page - 1 < len(layer)
         )
         return ParsedDocument(
             text="\n\n".join(parts),
@@ -62,5 +88,4 @@ class DoclingParser:
             parser_version=self.version,
             ocr_used=ocr_used,
             seconds=time.perf_counter() - started,
-            warnings=[str(e) for e in result.errors][:5],
         )

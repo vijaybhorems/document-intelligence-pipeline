@@ -12,6 +12,7 @@ dependencies = [
     "llama-index-core>=0.14.25",
     "llama-index-embeddings-openai>=0.7.0",
     "numpy>=2.5.4",
+    "onnxruntime>=1.31.0",
     "openai>=3.35.1",
     "openinference-instrumentation-openai>=0.1.65",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
