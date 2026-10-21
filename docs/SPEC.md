@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.12 |
+| **Status** | Draft v0.13 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-21 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -436,12 +436,18 @@ Measure all three on the experiment set: valid-output rate, **hallucination rate
 ### 9.1 GCS layout
 
 ```
-gs://{project}-dip-{env}/
-  raw/{sha256}.{ext}
-  parsed/{sha256}/{parser}-{ver}.json
-  records/dt=YYYY-MM-DD/{record_id}.json      # source of truth
-  lake/records/…parquet   lake/eval/runs/…parquet   lake/eval/field_results/…parquet
+gs://{project}-docs/
+  raw/{sha256}.{ext}                                  # uploads; deleted after 30 days
+  records/dt=YYYY-MM-DD/{record_id}.json              # source of truth
+  lake/records/dt=YYYY-MM-DD/part-0.parquet           # dip-compactor, hourly
+  lake/record_fields/dt=YYYY-MM-DD/part-0.parquet
+  lake/eval/runs.parquet                              # dip lake-push-evals
+  lake/eval/field_results/{run_id}.parquet
 ```
+
+Parse results are cached locally for eval runs (`data/parsed/`); the service doesn't store them, because the production route (D1) parses with pypdf in milliseconds.
+
+**Compaction (Phase 9):** `dip compact` (`src/dip/analytics/lake.py`) rebuilds a day partition only when one of its records is newer than its Parquet file. Partition columns live in the path (hive partitioning). The compactor's service account can write only under `lake/`, enforced by an IAM condition on object names.
 
 ### 9.2 Tables
 
@@ -449,7 +455,7 @@ gs://{project}-dip-{env}/
 - `record_fields`: long format, one row per (record, field), with `field_type`, `clause_family`, `present`, `value_text`, `value_date`, `grounded`, `evidence_count`.
 - `eval_runs` and `eval_field_results` (§10.5).
 
-### 9.3 Questions DuckDB must answer (`analytics/queries/*.sql`)
+### 9.3 Questions DuckDB must answer (`src/dip/analytics/sql/*.sql`)
 
 - Clause prevalence by contract type.
 - Governing-law distribution.
@@ -457,6 +463,22 @@ gs://{project}-dip-{env}/
 - Fields that regressed between two eval runs.
 
 `GET /v1/analytics/{query_name}` serves a **whitelisted** set of these queries. The API never accepts raw SQL.
+
+**Status (Phase 9):** all four are answered live.
+
+| Query | Question |
+|---|---|
+| `clause_prevalence` | clause prevalence by contract type |
+| `governing_law` | governing-law distribution |
+| `production_by_route` | cost and latency in production |
+| `eval_by_route_model` | F1, cost and latency by route and model; reproduces the D1/D2 tables |
+| `field_regressions` | fields that regressed between two runs |
+
+- **Parameters** are typed and range- or pattern-checked, then bound by DuckDB, never formatted into SQL.
+- **The connection is locked** (`allowed_directories` = the lake, `enable_external_access = false`, `lock_configuration`), so even our own SQL can't read anything else.
+- **DuckDB reads GCS with a short-lived OAuth token** from the service account. No HMAC keys.
+- **The SQL's headline F1 equals the Python scorer's** on a real run, checked by a test.
+- **Contract type** isn't on a record; it is derived from the extracted title (`dip.analytics.contract_types`), and matches CUAD's own labels on **95.1%** of the 510 contracts.
 
 ---
 
@@ -564,6 +586,7 @@ Then write **"why these categories are hard"** in `docs/results.md`. Look for pa
 - **Tracing:** OpenTelemetry + OpenInference instrumentation for OpenAI (and for LlamaIndex in the retrieval variant), exported to Arize (`arize-otel` `register(...)`; check current package names when you implement). One trace per job, with spans for `parse`, `extract.group.*`, `ground` and `validate`. Locally, send the same traces to **Arize Phoenix** in Docker, starting from the first LLM call in Phase 3.
 - **Experiments:** the experiment, dev and test sets live as Arize datasets, and every eval run is an Arize experiment with per-field P/R evaluators. This is where you compare D1–D7 visually.
 - **Production monitoring:** grounding rate, hallucination proxy (ungrounded rate), refusal rate, null rate per field, cost/doc, and route mix. A sudden jump in null rate is the earliest sign of a parsing regression.
+- **Alerts (Phase 9):** log-based metrics on `job.failed`, `sweeper.requeued` and `sweeper.gave_up`, each with an email alert policy (`infra/terraform/alerts.tf`). Every process logs JSON outside `DIP_ENV=local`, the CLI included, so the jobs' events are matchable. Verified end to end with a planted stranded job.
 
 ---
 
@@ -577,7 +600,7 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 | `GET /v1/extractions/{job_id}` | Status, stage timings, error | `200` · `404` |
 | `GET /v1/extractions/{job_id}/record` | The `ContractRecord` | `200` · `409` not finished · `404` |
 | `GET /v1/schema` | JSON Schema of `ContractRecord` | `200` |
-| `GET /v1/analytics/{query_name}` | Whitelisted DuckDB queries | `200` · `404` |
+| `GET /v1/analytics`, `/v1/analytics/{query_name}` | Whitelisted DuckDB queries, and their parameters | `200` · `404` · `422` bad parameter |
 | `POST /internal/process` | Cloud Tasks only (OIDC) | `200` / `5xx` → retry |
 | `GET /health`, `/ready` | Liveness / readiness (not `/healthz`: Cloud Run reserves some paths ending in `z`) | `200` |
 
@@ -585,16 +608,22 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 - **Auth:** `X-API-Key` header with keys from Secret Manager. `/internal/*` accepts only the Cloud Tasks service account's OIDC token. With the HTTP queue that stands in for Cloud Tasks locally (docker compose), it takes a shared `X-Internal-Token` instead; the auth mode follows the queue, not the storage backend.
 - **Errors:** RFC 9457 `application/problem+json`. The request size limit is enforced while streaming the upload.
 - **Retries:** a job gets 3 attempts. Before the last, a failure puts the job back to `queued` and answers 5xx so the queue redelivers; the last failure marks it `failed` and answers 200 so the queue stops. Every queue, including the in-process one, redelivers the same way.
-- **Status (Phase 7):** everything in the table is implemented except `{gcs_uri}` uploads, `?route=` and the analytics endpoint (Phase 9). Job states: `queued → routing → extracting → validating → succeeded | partially_succeeded | failed`. `partially_succeeded` means a record exists but some fields failed validation even after the re-ask.
+- **Backpressure (Phase 9):** once `DIP_MAX_QUEUED_JOBS` (200) jobs are waiting, uploads get `429` with `Retry-After: 60`. The check is a Firestore count aggregation, only on new jobs. The Cloud Tasks rate cap (4 in flight) keeps OpenAI within its limits; the 429 keeps the backlog bounded, so a burst isn't silently turned into hours of waiting.
+- **Status (Phases 7–9):** everything in the table is implemented except `{gcs_uri}` uploads and `?route=`. Job states: `queued → routing → extracting → validating → succeeded | partially_succeeded | failed`. `partially_succeeded` means a record exists but some fields failed validation even after the re-ask.
 
-### 12.1 Non-functional targets (provisional; replace with measured values after Phase 6)
+### 12.1 Non-functional targets, measured
 
-| Metric | Target |
-|---|---|
-| p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). **Phase 7, first E2E (one 5-page contract, upload → record):** 13–14 s on both routes, locally and through compose; the queue and emulators add under a second. Real p95 comes from the Phase 9 load test. **Phase 8, on Cloud Run:** about 17 s warm; a cold worker adds about 9 s, and the API's cold start is about 11 s. |
-| p95 latency, non-processing endpoints | < 300 ms |
-| Median cost per document | set from the D1/D2 decision, then enforced in CI. Phase 3 measured **$0.0048** (gpt-5.6-luna, single call, CUAD txt, dev). **After D1/D2:** about $0.0075 per born-digital contract and about $0.015 per scanned one (luna, prompt v4, experiment set). |
-| Job success rate (valid input) | ≥ 99% |
+**Load test (Phase 9):**
+- **Setup:** 50 train-split contracts (40 born-digital, 10 synthetic scans; median 9 pages, max 53), with Locust keeping 10 jobs in flight against dev on Cloud Run. Cloud Tasks dispatches 4 at a time.
+- **Results:** 50/50 succeeded, $0.44 total, **13.9 contracts/min**.
+- **Data:** `data/loadtest/`, reproducible with `loadtest/`.
+
+| Metric | Target | Measured |
+|---|---|---|
+| p95 end-to-end, ~20-page born-digital PDF | < 90 s | ✅ **63 s** for 15–25 pages. All born-digital: p50 40 s, p95 64 s. Of the median, 26 s is waiting in the queue (10 in flight, 4 dispatched) and 13 s is extraction; extraction p95 is 22 s. Scans: p50 32 s, p95 101 s (a 49-page scan took 138 s). Without queueing (Phase 8, one at a time): ~17 s, plus ~9 s for a cold worker. |
+| p95 latency, non-processing endpoints | < 300 ms | ✅ status **160 ms** (977 polls), record **260 ms**. Upload p95 is 1.3 s, because it carries the file and writes to GCS, Firestore and Tasks. Analytics queries take about 2 s (DuckDB over GCS); they aren't on a request path and aren't held to this target. |
+| Median cost per document | set by D1/D2 | **$0.0061** (born-digital $0.0061, scanned $0.0088) at a median of 9 pages, in line with D1/D2's per-page cost. |
+| Job success rate (valid input) | ≥ 99% | 50/50 = 100%, no retries needed. With n = 50, the 95% lower bound is 93%: this run can't *prove* 99%; production data in `production_by_route` will. |
 
 ### 12.2 MCP interface (agent access)
 
@@ -741,7 +770,10 @@ This applies "decisions through evals" to the agent layer.
   - **On merge:** build, push, deploy both services by digest (worker first), and post-deploy smoke test. **Not** `terraform apply`: infrastructure is applied by a person (ADR I10).
   - **Prod:** manual approval, then promote the same image digest.
 - **Runbook ([`docs/runbook.md`](runbook.md)):** first deploy, replay a failed job, re-extract everything with a new prompt version, roll back a Cloud Run revision, rotate keys, and respond to a budget alert.
-- **Status (Phase 8):** dev is live (`infra/terraform`, `envs/dev.tfvars`). Prod has a project and a budget but no deployment yet. Compactor, eval job and Scheduler come in Phase 9; `dip-mcp` in 9.5.
+- **Status (Phase 9):** dev is live (`infra/terraform`, `envs/dev.tfvars`).
+  - Cloud Run Jobs `dip-compactor` (hourly) and `dip-sweeper` (every 10 min) run on Cloud Scheduler, each with its own service account.
+  - `dip-eval` as a Cloud Run Job is not built: eval runs need the local CUAD data and are published with `dip lake-push-evals`.
+  - Prod has a project and a budget, but no deployment yet; `dip-mcp` comes in 9.5.
 
 ---
 
@@ -888,7 +920,10 @@ document_intelligence_pipeline/
 6. ~~Partial gold dates~~ **Decided in Phase 2:** match on the components gold knows (§10.3).
 7. MCP: do your target clients support MCP's long-running task features yet, or is polling enough? And do they all accept a pre-registered OAuth client ID, or will you need the OAuth proxy fallback (ADR I8)? (The authorization server is decided: Google OAuth.)
 8. Will more than one organization ever connect via MCP? If so, add `owner_id` scoping before exposing `search_records`.
-9. **Stale jobs (found in Phase 7):** a job whose deliveries all fail (worker down longer than the queue retries) stays `queued` forever. The HTTP queue now logs `queue.gave_up`, and Cloud Tasks gives up too after its max attempts. Phase 9: a sweeper (Cloud Scheduler → Cloud Run Job) that re-enqueues jobs `queued` or in a running stage for longer than N minutes, plus an alert on `queue.gave_up`.
+9. ~~Stale jobs~~ **Decided in Phase 9:** `dip-sweeper` re-sends unfinished jobs idle for more than 35 minutes, at most twice, then fails them. It alerts on both.
+   - **Why 35 minutes:** Cloud Tasks' retry window was cut to 30 minutes, so the sweeper can never re-send a task the queue is still retrying (which would mean double extraction and a double bill).
+   - **Why it can't hit a live job:** a running job can't look stale, because the worker updates it at every stage and its request is killed at 15 minutes.
+   - **Known limit:** under a backlog longer than 35 minutes, legitimately waiting jobs would be re-sent. The 429 backpressure cap (200 waiting, at ~14/min ≈ 15 minutes of work) keeps the backlog well below that.
 
 ---
 
@@ -905,6 +940,14 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.13 (2026-10-21), Phase 9:**
+  - §9: lake as built: compaction, layout, the 5 named queries, contract-type derivation (95.1%).
+  - §12: analytics endpoint and 429 backpressure.
+  - §12.1: the targets measured by a 50-contract load test.
+  - §11: alerts.
+  - §13: jobs and Scheduler.
+  - §20 q9 decided (sweeper).
 
 - **v0.12 (2026-10-21), Phase 8:**
   - Dev deployed with Terraform: Cloud Run api/worker, Cloud Tasks, Firestore, GCS, Secret Manager, Artifact Registry, Workload Identity Federation.

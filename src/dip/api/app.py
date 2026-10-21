@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from dip import __version__
+from dip.analytics.queries import QUERIES, QueryError
 from dip.config import Environment, get_settings
 from dip.observability.logging import configure_logging
 from dip.schema.domain import ContractRecord
@@ -107,6 +108,13 @@ def create_app(services: Services | None = None) -> FastAPI:
         if not force and (reuse := await run_in_threadpool(svc.jobs.find_reusable, sha, version)):
             return await _respond(reuse, wait=wait, deduplicated=True)
 
+        # Backpressure: past the backlog cap, refuse new work instead of queueing it for
+        # hours. Cheap to check (one aggregation query) and only on new jobs.
+        cap = svc.settings.max_queued_jobs
+        if cap and await run_in_threadpool(svc.jobs.count_queued) >= cap:
+            raise HTTPException(
+                429, f"{cap} jobs are already waiting; retry later", headers={"Retry-After": "60"}
+            )
         key = f"raw/{sha}.{EXTENSIONS[upload.mime]}"
         if not await run_in_threadpool(svc.blobs.exists, key):
             await run_in_threadpool(svc.blobs.put, key, data, upload.mime)
@@ -144,6 +152,44 @@ def create_app(services: Services | None = None) -> FastAPI:
         body = accepted(job, deduplicated)
         status = 200 if job.status.done else 202
         return JSONResponse(body.model_dump(mode="json"), status_code=status)
+
+    @app.get("/v1/analytics", dependencies=auth)
+    def analytics_index() -> dict[str, object]:
+        return {
+            "queries": [
+                {
+                    "name": q.name,
+                    "description": q.description,
+                    "params": [
+                        {
+                            "name": p.name,
+                            "type": p.kind.__name__,
+                            "default": p.default,
+                            "description": p.description,
+                        }
+                        for p in q.params
+                    ],
+                }
+                for q in QUERIES.values()
+            ]
+        }
+
+    @app.get("/v1/analytics/{name}", dependencies=auth)
+    def analytics(name: str, request: Request) -> dict[str, object]:
+        """A whitelisted query over the lake (SPEC §9.3). Never raw SQL."""
+        if name not in QUERIES:
+            raise HTTPException(404, f"no query named {name!r}; see GET /v1/analytics")
+        try:
+            result = svc.lake.run(name, dict(request.query_params))
+        except QueryError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {
+            "query": name,
+            "params": QUERIES[name].bind(dict(request.query_params)),
+            "columns": result.columns,
+            "rows": result.rows,
+            "generated_at": now(),
+        }
 
     @app.get("/v1/extractions/{job_id}", dependencies=auth)
     def get_job(job_id: str) -> Job:

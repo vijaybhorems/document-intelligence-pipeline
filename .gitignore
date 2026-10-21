@@ -45,3 +45,5 @@ crash.log
 
 # Terraform (infra/terraform): lock file is committed; working dir and plans are not.
 infra/terraform/.terraform/
+# Personal settings (alert emails): never in the public repo.
+infra/terraform/*.auto.tfvars

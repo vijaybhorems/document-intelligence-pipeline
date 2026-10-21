@@ -13,11 +13,13 @@ resource "google_cloud_tasks_queue" "jobs" {
   # 200 once it gives up, so the queue must allow at least that many deliveries. The
   # extra headroom covers deliveries that never reached the app (cold start, deploy).
   retry_config {
-    max_attempts       = 5
-    min_backoff        = "10s"
-    max_backoff        = "300s"
-    max_doublings      = 4
-    max_retry_duration = "3600s"
+    max_attempts  = 5
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 4
+    # The sweeper (dip.service.sweeper, 35 min) only touches jobs idle longer than this
+    # window, so it never re-sends a task the queue is still retrying.
+    max_retry_duration = "1800s"
   }
 
   stackdriver_logging_config {

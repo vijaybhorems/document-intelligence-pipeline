@@ -51,6 +51,11 @@ jobs:
             gcloud run deploy "$service" --image "$DIGEST" \
               --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
           done
+          # Scheduled jobs pick up the same image on their next run.
+          for job in dip-compactor dip-sweeper; do
+            gcloud run jobs update "$job" --image "$DIGEST" \
+              --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
+          done
 
       - name: Smoke test
         run: |

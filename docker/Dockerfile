@@ -34,16 +34,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # field_notes.json the prompt silently loses its examples (decision D5).
 RUN /app/.venv/bin/python -c "from dip.extract.prompts import _field_notes; assert _field_notes(), 'field_notes.json missing from the wheel'"
 
+# DuckDB's httpfs (reads the lake on GCS) installed now, for this platform, so the API
+# never downloads code at runtime. DuckDB verifies the extension's signature.
+RUN /app/.venv/bin/python -c "import duckdb; duckdb.connect(config={'extension_directory': '/app/duckdb_extensions'}).install_extension('httpfs')"
+
 # ---------------------------------------------------------------- runtime
 FROM python:3.13.15-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS runtime
 # Not "dip": Debian already has a group of that name (dial-up IP).
 RUN groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
 COPY --from=build --chown=root:root /app/.venv /app/.venv
+COPY --from=build --chown=root:root /app/duckdb_extensions /app/duckdb_extensions
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DIP_ROLE=api \
+    DIP_DUCKDB_EXTENSION_DIR=/app/duckdb_extensions \
     DIP_ENV=dev
 WORKDIR /app
 USER 10001:10001

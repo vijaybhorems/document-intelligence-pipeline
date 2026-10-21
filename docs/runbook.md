@@ -52,17 +52,32 @@ Do the same for `dip-worker`. The next deploy from `main` moves traffic to the n
 ## A job failed or is stuck
 
 - **Failed** (`status: failed`, `error` says why): fix the cause, then re-submit the same document with `?force=true` (`dip submit --force`). The upload is content-addressed, so nothing is stored twice.
-- **Stuck in `queued`** (SPEC §20, open question 9): its deliveries ran out.
-  - Look for `queue.gave_up` in the API logs.
-  - Look for failed attempts in the Cloud Tasks logs:
-    ```bash
-    gcloud logging read 'resource.type="cloud_tasks_queue"' --project=$P --limit=20
-    ```
-  - Re-submit with `?force=true`. Phase 9 adds a sweeper that does this automatically.
+- **Stuck** (`queued` or a running stage, no update for a while): the sweeper (`dip-sweeper`, every 10 min) re-sends jobs idle for more than 35 minutes, at most twice, then marks them `failed`. Each re-send logs `sweeper.requeued` and sends you an email. Why did the deliveries stop?
+  ```bash
+  gcloud logging read 'resource.type="cloud_tasks_queue"' --project=$P --limit=20
+  ```
+  To sweep now instead of waiting: `gcloud run jobs execute dip-sweeper --region=$R --project=$P --wait`.
 - **Logs for one job:**
   ```bash
   gcloud logging read "jsonPayload.job_id=\"<job id>\"" --project=$P --limit=50 --format='value(jsonPayload)'
   ```
+
+## Uploads get 429
+
+The API refuses new jobs once `DIP_MAX_QUEUED_JOBS` (200) are already waiting: backpressure, so a burst doesn't turn into hours of queue. Clients should honour `Retry-After`.
+- If the backlog is real, the queue is draining as fast as it's allowed to.
+- To drain faster, raise `tasks_max_concurrent` and `worker_max_instances`, within the OpenAI rate limit.
+- If nothing drains, check that the queue isn't paused (`gcloud tasks queues describe dip-jobs --location=$R`).
+
+## Analytics are stale or empty
+
+`/v1/analytics/*` reads the lake, which `dip-compactor` rebuilds hourly from `records/`, so results lag records by up to an hour.
+- **Compact now:** `gcloud run jobs execute dip-compactor --region=$R --project=$P --wait`
+- **Rebuild everything** (after changing the lake schema):
+  ```bash
+  gcloud run jobs execute dip-compactor --args=compact,--force --region=$R --project=$P
+  ```
+- **Eval queries** (`eval_by_route_model`, `field_regressions`) read runs you published: run `uv run dip lake-push-evals --bucket $P-docs` after new eval runs.
 
 ## Re-extract everything with a new pipeline version
 
@@ -79,6 +94,16 @@ Records are keyed by document hash **and** `pipeline_version` (schema, prompt, m
 Old versions stay in Secret Manager until disabled: `gcloud secrets versions disable <n> --secret=<name> --project=$P`.
 
 There are no Google credentials to rotate: CI uses Workload Identity Federation and the services use their attached service accounts.
+
+## An alert email arrived
+
+| Alert | Means | Do |
+|---|---|---|
+| A dip job failed permanently | a job used its 3 attempts | read its `error` (`GET /v1/extractions/{id}`) and the worker logs for that `job_id`; fix, then `?force=true` |
+| dip jobs were stranded and re-sent | deliveries stopped reaching the worker | Cloud Tasks logs (above); a deploy or IAM change is the usual cause |
+| A stranded dip job was abandoned | re-sends didn't help either | as above, then re-submit |
+
+Alert recipients are in `infra/terraform/private.auto.tfvars` (gitignored).
 
 ## A budget alert fired
 
