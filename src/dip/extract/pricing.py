@@ -52,3 +52,18 @@ def cost_usd(model: str, input_tokens: int, cached_tokens: int, output_tokens: i
     p = price_of(model)
     uncached = input_tokens - cached_tokens
     return (uncached * p.input + cached_tokens * p.cached_input + output_tokens * p.output) / 1e6
+
+
+# Cloud Run services, request-based billing, us-central1, from the Cloud Billing
+# Catalog API (service 152E-C115-5142), 2026-10-20: $0.000024 per vCPU-second and
+# $0.0000025 per GiB-second. The Docling worker is sized at 4 vCPU / 8 GiB (SPEC §6.5).
+CLOUD_RUN_VCPU_SECOND = 0.000024
+CLOUD_RUN_GIB_SECOND = 0.0000025
+WORKER_VCPU = 4
+WORKER_GIB = 8
+WORKER_USD_PER_SECOND = WORKER_VCPU * CLOUD_RUN_VCPU_SECOND + WORKER_GIB * CLOUD_RUN_GIB_SECOND
+
+
+def compute_usd(seconds: float) -> float:
+    """Parsing time priced as Cloud Run worker time. Measured locally, so an estimate."""
+    return seconds * WORKER_USD_PER_SECOND

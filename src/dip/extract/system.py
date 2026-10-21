@@ -17,7 +17,9 @@ class Usage(BaseModel):
     output_tokens: int = 0  # includes reasoning
     reasoning_tokens: int = 0
     embedding_tokens: int = 0  # retrieval (D3); never mixed into input_tokens
-    cost_usd: float = 0.0
+    cost_usd: float = 0.0  # API spend: what the budget ledger counts
+    compute_seconds: float = 0.0  # local parsing time (D1)
+    compute_usd: float = 0.0  # that time priced at Cloud Run rates; an estimate, not spend
     latency_s: float = 0.0
 
     def __add__(self, other: "Usage") -> "Usage":
@@ -29,6 +31,8 @@ class Usage(BaseModel):
             reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
             embedding_tokens=self.embedding_tokens + other.embedding_tokens,
             cost_usd=self.cost_usd + other.cost_usd,
+            compute_seconds=self.compute_seconds + other.compute_seconds,
+            compute_usd=self.compute_usd + other.compute_usd,
             latency_s=self.latency_s + other.latency_s,
         )
 

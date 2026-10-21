@@ -10,20 +10,29 @@ dependencies = [
     "httpx>=0.28.1",
     "llama-index-core>=0.14.25",
     "llama-index-embeddings-openai>=0.7.0",
+    "numpy>=2.5.4",
     "openai>=3.35.1",
     "openinference-instrumentation-openai>=0.1.65",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
     "opentelemetry-sdk>=1.45.1",
+    "pillow>=12.3.0",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
     "pypdf>=6.21.1",
+    "pypdfium2>=5.14.0",
     "rapidfuzz>=3.14.6",
     "tiktoken>=0.14.0",
-    "typer>=0.27.3",
+    "typer>=0.19",  # docling caps typer<0.27 (its CLI extra); nothing here needs newer
 ]
 
 [project.scripts]
 dip = "dip.cli:app"
+
+[project.optional-dependencies]
+docling = [
+    "docling>=2.141.0",
+    "onnxruntime>=1.31.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.14"]
@@ -90,6 +99,7 @@ branch = true
 
 [dependency-groups]
 dev = [
+    "matplotlib>=3.11.2",
     "pre-commit>=4.7.0",
     "pyright[nodejs]>=1.1.414",
     "pytest>=9.1.1",

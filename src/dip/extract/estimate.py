@@ -22,6 +22,10 @@ from dip.schema.registry import FIELDS
 OUTPUT_TOKENS_PER_CALL = 250
 OUTPUT_TOKENS_PER_FIELD = 45
 OUTPUT_TOKENS_PER_NULL_FIELD = 4  # shared schema: `"field": null` for fields outside the call
+# Multimodal route: OpenAI sends each PDF page as an image (plus its text layer, if
+# any). Measured on the Phase 6 experiment runs (gpt-5.6-luna): median ~1,600 tokens
+# per clean page, ~3,200 per scanned page. The higher figure keeps estimates safe.
+INPUT_TOKENS_PER_PDF_PAGE = 3_300
 
 
 @dataclass(frozen=True)
@@ -44,7 +48,10 @@ def _tokens(text: str) -> int:
     return len(_encoder().encode(text, disallowed_special=()))
 
 
-def estimate(extractor: OpenAIExtractor, texts: dict[str, str]) -> Estimate:
+def estimate(
+    extractor: OpenAIExtractor, texts: dict[str, str], pdf_pages: dict[str, int] | None = None
+) -> Estimate:
+    """Cost before running. ``pdf_pages`` switches to the multimodal route (page images)."""
     from dip.extract.extractor import call_plan
 
     price = price_of(extractor.model)
@@ -73,10 +80,13 @@ def estimate(extractor: OpenAIExtractor, texts: dict[str, str]) -> Estimate:
     )
 
     input_tokens = cacheable = 0
-    for text in texts.values():
-        prefix = system + sum(
-            _tokens(m) for m in prompts.context_messages(text, extractor.prompt_version)
-        )
+    for doc_id, text in texts.items():
+        if pdf_pages is not None:
+            prefix = system + INPUT_TOKENS_PER_PDF_PAGE * pdf_pages[doc_id]
+        else:
+            prefix = system + sum(
+                _tokens(m) for m in prompts.context_messages(text, extractor.prompt_version)
+            )
         input_tokens += sum(
             prefix + extra + schema
             for extra, schema in zip(per_call_extra, per_call_schema, strict=True)

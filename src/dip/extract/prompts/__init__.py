@@ -56,6 +56,21 @@ def contract_message(text: str) -> str:
     return f"<contract>\n{text}\n</contract>"
 
 
+def pdf_content(pdf: bytes, filename: str = "contract.pdf") -> list[dict[str, str]]:
+    """The contract as a PDF file input: the model reads the pages directly (decision D1)."""
+    import base64
+
+    encoded = base64.b64encode(pdf).decode("ascii")
+    return [
+        {"type": "input_text", "text": "The contract is attached as a PDF."},
+        {
+            "type": "input_file",
+            "filename": filename,
+            "file_data": f"data:application/pdf;base64,{encoded}",
+        },
+    ]
+
+
 def excerpts_message(excerpts: str) -> str:
     return (
         "These are the parts of the contract most relevant to the fields below; "
