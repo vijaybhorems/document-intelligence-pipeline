@@ -94,7 +94,7 @@ services:
     command: ["-scheme", "http", "-port", "4443", "-external-url", "http://gcs:4443", "-backend", "memory"]
 
   firestore:
-    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:587.0.0-emulators@sha256:8d8573471c489a409f03891d2c24d177fa531276184f7002b9a2d853d1b3ed54
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:590.0.0-emulators@sha256:ba2726407ae3654d11ffdcd2eff74879f46c2ce805a8caa554d690afb615e433
     command: ["gcloud", "emulators", "firestore", "start", "--host-port=0.0.0.0:8085", "--quiet"]
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:8085/"]
