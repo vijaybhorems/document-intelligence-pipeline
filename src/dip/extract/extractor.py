@@ -20,6 +20,7 @@ from typing import Any, cast
 
 import openai
 from openai import AsyncOpenAI
+from openai.types.responses import ResponseInputParam
 from openai.types.shared_params import Reasoning
 from opentelemetry import trace
 from pydantic import BaseModel
@@ -137,11 +138,24 @@ class OpenAIExtractor:
         max_cost_usd: float | None = None,
         on_usage: Callable[[Usage], None] | None = None,
     ) -> dict[str, SystemOutput]:
-        return asyncio.run(self._predict_all(texts, max_cost_usd, on_usage))
+        inputs: dict[str, tuple[str, bytes | None]] = {d: (text, None) for d, text in texts.items()}
+        return asyncio.run(self._predict_all(inputs, max_cost_usd, on_usage))
+
+    def predict_pdfs(
+        self,
+        pdfs: dict[str, bytes],
+        max_cost_usd: float | None = None,
+        on_usage: Callable[[Usage], None] | None = None,
+    ) -> dict[str, SystemOutput]:
+        """Multimodal route (D1): the model reads each PDF directly, no parser in between."""
+        if self.retriever is not None:
+            raise ValueError("retrieval needs text; it can't be combined with PDF input")
+        inputs: dict[str, tuple[str, bytes | None]] = {d: ("", pdf) for d, pdf in pdfs.items()}
+        return asyncio.run(self._predict_all(inputs, max_cost_usd, on_usage))
 
     async def _predict_all(
         self,
-        texts: dict[str, str],
+        inputs: dict[str, tuple[str, bytes | None]],
         max_cost_usd: float | None,
         on_usage: Callable[[Usage], None] | None,
     ) -> dict[str, SystemOutput]:
@@ -159,19 +173,24 @@ class OpenAIExtractor:
                 self.retriever.prepare_queries, all_specs, self.prompt_version, budget.record
             )
 
-        async def one(doc_id: str, text: str) -> None:
+        async def one(doc_id: str, text: str, pdf: bytes | None) -> None:
             async with contracts:
                 if budget.exhausted:
                     return
-                results[doc_id] = await self._predict_one(client, calls, budget, text)
+                results[doc_id] = await self._predict_one(client, calls, budget, text, pdf)
 
-        await asyncio.gather(*(one(doc_id, text) for doc_id, text in sorted(texts.items())))
+        await asyncio.gather(*(one(d, text, pdf) for d, (text, pdf) in sorted(inputs.items())))
         return results
 
     # ── One contract ─────────────────────────────────────────────────────────
 
     async def _predict_one(
-        self, client: AsyncOpenAI, calls: asyncio.Semaphore, budget: _Budget, text: str
+        self,
+        client: AsyncOpenAI,
+        calls: asyncio.Semaphore,
+        budget: _Budget,
+        text: str,
+        pdf: bytes | None = None,
     ) -> SystemOutput:
         with _tracer.start_as_current_span("extract.contract") as span:
             span.set_attributes(
@@ -179,9 +198,10 @@ class OpenAIExtractor:
                     "dip.model": self.model,
                     "dip.strategy": self.strategy.value,
                     "dip.chars": len(text),
+                    "dip.pdf_bytes": len(pdf or b""),
                 }
             )
-            output = await self._predict_one_untraced(client, calls, budget, text)
+            output = await self._predict_one_untraced(client, calls, budget, text, pdf)
             span.set_attributes(
                 {
                     "dip.cost_usd": output.usage.cost_usd,
@@ -192,10 +212,15 @@ class OpenAIExtractor:
             return output
 
     async def _predict_one_untraced(
-        self, client: AsyncOpenAI, calls: asyncio.Semaphore, budget: _Budget, text: str
+        self,
+        client: AsyncOpenAI,
+        calls: asyncio.Semaphore,
+        budget: _Budget,
+        text: str,
+        pdf: bytes | None = None,
     ) -> SystemOutput:
         started = time.perf_counter()
-        cache_key = "dip-" + hashlib.sha256(text.encode()).hexdigest()[:24]
+        cache_key = "dip-" + hashlib.sha256(pdf or text.encode()).hexdigest()[:24]
         excerpts = None
         retrieval_usage = Usage()
         if self.retriever is not None:
@@ -215,11 +240,15 @@ class OpenAIExtractor:
             )
         first, *rest = self._plan
         outcomes = [
-            await self._call(client, calls, budget, text, cache_key, *first, excerpts=excerpts)
+            await self._call(
+                client, calls, budget, text, cache_key, *first, excerpts=excerpts, pdf=pdf
+            )
         ]
         outcomes += await asyncio.gather(
             *(
-                self._call(client, calls, budget, text, cache_key, *call, excerpts=excerpts)
+                self._call(
+                    client, calls, budget, text, cache_key, *call, excerpts=excerpts, pdf=pdf
+                )
                 for call in rest
             )
         )
@@ -247,6 +276,7 @@ class OpenAIExtractor:
         feedback: str | None = None,
         shared_schema: bool | None = None,
         excerpts: str | None = None,
+        pdf: bytes | None = None,
     ) -> tuple[dict[str, LLMField], Usage, list[str]]:
         shared = self.shared_schema if shared_schema is None else shared_schema
         max_tokens = min(
@@ -259,25 +289,7 @@ class OpenAIExtractor:
                 try:
                     response = await client.responses.parse(
                         model=self.model,
-                        input=[
-                            {
-                                "role": "system",
-                                "content": prompts.system_prompt(self.prompt_version),
-                            },
-                            *(
-                                {"role": "user", "content": m}
-                                for m in prompts.context_messages(
-                                    text, self.prompt_version, excerpts
-                                )
-                            ),
-                            {
-                                "role": "user",
-                                "content": prompts.fields_prompt(
-                                    specs, self.prompt_version, shared
-                                ),
-                            },
-                            *([{"role": "user", "content": feedback}] if feedback else []),
-                        ],
+                        input=self._messages(text, specs, shared, feedback, excerpts, pdf),
                         text_format=model_cls,
                         reasoning=cast("Reasoning", {"effort": self.reasoning_effort}),
                         max_output_tokens=max_tokens,
@@ -369,6 +381,32 @@ class OpenAIExtractor:
 
         await asyncio.gather(*(one(d, p) for d, p in sorted(problems.items()) if p))
         return results
+
+    def _messages(
+        self,
+        text: str,
+        specs: list[FieldSpec],
+        shared: bool,
+        feedback: str | None,
+        excerpts: str | None,
+        pdf: bytes | None,
+    ) -> "ResponseInputParam":
+        """[system] [contract: text, excerpts or PDF] [field instructions] [re-ask feedback]."""
+        v = self.prompt_version
+        context: list[Any] = (
+            [{"role": "user", "content": prompts.pdf_content(pdf)}]
+            if pdf is not None
+            else [
+                {"role": "user", "content": m} for m in prompts.context_messages(text, v, excerpts)
+            ]
+        )
+        messages: list[Any] = [
+            {"role": "system", "content": prompts.system_prompt(v)},
+            *context,
+            {"role": "user", "content": prompts.fields_prompt(specs, v, shared)},
+            *([{"role": "user", "content": feedback}] if feedback else []),
+        ]
+        return cast("ResponseInputParam", messages)
 
     def _usage(self, response: Any) -> Usage:
         u = response.usage

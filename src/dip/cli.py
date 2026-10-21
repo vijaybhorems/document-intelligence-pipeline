@@ -9,8 +9,10 @@ from dip import __version__
 from dip.config import get_settings
 
 if TYPE_CHECKING:
+    from dip.extract.extractor import OpenAIExtractor
     from dip.extract.retrieval import Retriever
     from dip.extract.system import System
+    from dip.parse.base import Parser
 
 app = typer.Typer(help="Document intelligence pipeline.", no_args_is_help=True)
 
@@ -24,6 +26,8 @@ def _paths() -> dict[str, Path]:
         "profiles": data / "profiles",
         "splits": data / "splits.json",
         "runs": data / "runs",
+        "scans": data / "scans",
+        "parsed": data / "parsed",
     }
 
 
@@ -156,6 +160,10 @@ SplitOpt = Annotated[str, typer.Option(callback=_check_split)]
 PromptOpt = Annotated[
     str | None, typer.Option("--prompt-version", help="v1 | v2 | v3 | v4 (decision D5).")
 ]
+RouteOpt = Annotated[
+    str, typer.Option("--route", help="txt | pypdf | docling | multimodal (decision D1).")
+]
+VariantOpt = Annotated[str, typer.Option("--variant", help="clean | scanned (synthetic scans).")]
 ContextOpt = Annotated[str, typer.Option("--context", help="full | retrieved (decision D3).")]
 OwnSchemaOpt = Annotated[
     bool,
@@ -176,6 +184,9 @@ def _make_system(
     own_schema: bool = False,
     prompt_version: str | None = None,
     context: str = "full",
+    route: str = "txt",
+    variant: str = "clean",
+    split: str = "dev",
 ) -> "System":
     from dip.eval.baselines import SYSTEMS
     from dip.extract import prompts
@@ -192,7 +203,7 @@ def _make_system(
         raise typer.BadParameter("set DIP_OPENAI_API_KEY in .env first")
     if strategy not in Strategy.__members__.values():
         raise typer.BadParameter(f"--strategy must be one of {[s.value for s in Strategy]}")
-    return OpenAIExtractor(
+    extractor = OpenAIExtractor(
         model=model or settings.extraction_model,
         strategy=Strategy(strategy),
         reasoning_effort=effort or settings.reasoning_effort,
@@ -203,6 +214,49 @@ def _make_system(
         timeout_s=settings.request_timeout_s,
         api_key=settings.openai_api_key.get_secret_value(),
     )
+    return _route(extractor, route, variant, split)
+
+
+def _pdf_paths(split: str, variant: str) -> dict[str, Path]:
+    from dip.eval.runs import load_gold
+    from dip.ingest.synth_scans import scan_path
+
+    paths = _paths()
+    gold = load_gold(get_settings().data_dir, split)
+    if variant == "clean":
+        return {d: paths["cuad"] / "full_contract_pdf" / r.pdf_path for d, r in gold.items()}
+    scans = {d: scan_path(paths["scans"], d) for d in gold}
+    missing = [d for d, p in scans.items() if not p.exists()]
+    if missing:
+        raise typer.BadParameter(
+            f"{len(missing)} scans missing; run `dip make-scans --split {split}`"
+        )
+    return scans
+
+
+def _route(extractor: "OpenAIExtractor", route: str, variant: str, split: str) -> "System":
+    from dip.extract.routes import ROUTES, VARIANTS, MultimodalRoute, ParsedTextRoute
+
+    if route not in ROUTES or variant not in VARIANTS:
+        raise typer.BadParameter(f"--route one of {ROUTES}, --variant one of {VARIANTS}")
+    if route == "txt":
+        if variant != "clean":
+            raise typer.BadParameter("--route txt is CUAD's text files; there is no scanned txt")
+        return extractor
+    pdfs = _pdf_paths(split, variant)
+    if route == "multimodal":
+        return MultimodalRoute(extractor, pdfs, variant)
+    return ParsedTextRoute(_parser(route), extractor, pdfs, variant, _paths()["parsed"])
+
+
+def _parser(route: str) -> "Parser":
+    if route == "docling":
+        from dip.parse.docling_parser import DoclingParser
+
+        return DoclingParser()
+    from dip.parse.pypdf_parser import PypdfParser
+
+    return PypdfParser()
 
 
 def _retriever(context: str, api_key: str) -> "Retriever | None":
@@ -225,15 +279,28 @@ def _start_tracing() -> None:
 
 def _budget_check(system: object, split: str, max_cost: float | None) -> float | None:
     """Print the estimate and remaining budget; refuse runs that can't fit. Returns the run cap."""
+    from pypdf import PdfReader
+
     from dip.eval.runs import spent_usd, split_texts
     from dip.extract.estimate import estimate
     from dip.extract.extractor import OpenAIExtractor
+    from dip.extract.routes import MultimodalRoute
 
-    if not isinstance(system, OpenAIExtractor):
+    # Routes wrap an extractor; the budget check must see through them.
+    extractor = (
+        system if isinstance(system, OpenAIExtractor) else getattr(system, "extractor", None)
+    )
+    if not isinstance(extractor, OpenAIExtractor):
         return None
     remaining = get_settings().budget_usd - spent_usd(_paths()["runs"])
     cap = remaining if max_cost is None else min(remaining, max_cost)
-    est = estimate(system, split_texts(get_settings().data_dir, split))
+    texts = split_texts(get_settings().data_dir, split)
+    pages = (
+        {d: len(PdfReader(p).pages) for d, p in system.pdfs.items()}
+        if isinstance(system, MultimodalRoute)
+        else None
+    )
+    est = estimate(extractor, texts, pages)
     typer.echo(
         f"estimate: {est.contracts} contracts, {est.calls} calls, "
         f"{est.input_tokens:,} input + ~{est.output_tokens:,} output tokens, "
@@ -256,10 +323,23 @@ def estimate(
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
     context: ContextOpt = "full",
+    route: RouteOpt = "txt",
+    variant: VariantOpt = "clean",
 ) -> None:
     """Estimate a run's tokens and cost without calling the API."""
     _budget_check(
-        _make_system(system, model, strategy, effort, own_schema, prompt_version, context),
+        _make_system(
+            system,
+            model,
+            strategy,
+            effort,
+            own_schema,
+            prompt_version,
+            context,
+            route,
+            variant,
+            split,
+        ),
         split,
         max_cost=None,
     )
@@ -288,13 +368,17 @@ def predict(
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
     context: ContextOpt = "full",
+    route: RouteOpt = "txt",
+    variant: VariantOpt = "clean",
     max_cost_usd: MaxCostOpt = None,
 ) -> None:
     """Run a system over a split and save its predictions as a new run."""
     from dip.eval.runs import load_meta
     from dip.eval.runs import predict as run_predict
 
-    built = _make_system(system, model, strategy, effort, own_schema, prompt_version, context)
+    built = _make_system(
+        system, model, strategy, effort, own_schema, prompt_version, context, route, variant, split
+    )
     cap = _budget_check(built, split, max_cost_usd)
     from dip.observability.tracing import shutdown_tracing
 
@@ -364,6 +448,8 @@ def eval_cmd(
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
     context: ContextOpt = "full",
+    route: RouteOpt = "txt",
+    variant: VariantOpt = "clean",
     max_cost_usd: MaxCostOpt = None,
     compare: Annotated[str | None, typer.Option(help="run_id to compare against.")] = None,
     out: Annotated[Path | None, typer.Option(help="Also copy the report here.")] = None,
@@ -371,7 +457,9 @@ def eval_cmd(
     """predict + score + report in one go."""
     from dip.eval.runs import predict as run_predict
 
-    built = _make_system(system, model, strategy, effort, own_schema, prompt_version, context)
+    built = _make_system(
+        system, model, strategy, effort, own_schema, prompt_version, context, route, variant, split
+    )
     cap = _budget_check(built, split, max_cost_usd)
     from dip.observability.tracing import shutdown_tracing
 
@@ -465,6 +553,42 @@ def build_field_notes_cmd() -> None:
         f"{sum(bool(n.variants) for n in notes.values())} fields with variants, "
         f"{sum(bool(n.hard_negative) for n in notes.values())} with hard negatives"
     )
+
+
+# ── Phase 6: parsers and routes ──────────────────────────────────────────────
+
+
+@app.command("make-scans")
+def make_scans_cmd(split: SplitOpt = "experiment") -> None:
+    """Create synthetic image-only scans of a split's PDFs (data/scans/), seeded per contract."""
+    from dip.ingest.synth_scans import write_scans
+
+    written = write_scans(_pdf_paths(split, "clean"), _paths()["scans"])
+    typer.echo(f"{len(written)} scans in {_paths()['scans']}")
+
+
+@app.command()
+def parse(
+    route: Annotated[str, typer.Option("--parser", help="pypdf | docling")] = "docling",
+    split: SplitOpt = "experiment",
+    variant: VariantOpt = "clean",
+) -> None:
+    """Parse a split's PDFs into the cache ahead of extraction (free; Docling is slow)."""
+    import time
+
+    from dip.parse.cache import parse_cached
+
+    parser = _parser(route)
+    total = 0.0
+    for i, (doc_id, path) in enumerate(sorted(_pdf_paths(split, variant).items()), start=1):
+        started = time.perf_counter()
+        parsed = parse_cached(parser, path.read_bytes(), f"{doc_id}.pdf", _paths()["parsed"])
+        total += time.perf_counter() - started
+        typer.echo(
+            f"[{i}] {doc_id[:48]:48s} {len(parsed.pages):3d} pages {len(parsed.text):8,d} chars "
+            f"{parsed.seconds:6.1f}s ocr={parsed.ocr_used}"
+        )
+    typer.echo(f"done in {total:.0f}s")
 
 
 if __name__ == "__main__":
