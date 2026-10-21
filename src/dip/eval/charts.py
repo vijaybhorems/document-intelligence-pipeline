@@ -25,7 +25,18 @@ TEXT_SECONDARY = "#52514e"
 GRID = "#e8e7e3"
 FRONTIER = "#a8a7a2"
 MODEL_COLORS = {"gpt-5.6-luna": "#2a78d6", "gpt-5.6-terra": "#eb6834", "gpt-5.6-sol": "#1baf7a"}
-ROUTE_MARKERS = {"txt": "o", "pypdf": "s", "docling": "D", "multimodal": "^"}
+ROUTE_MARKERS = {"txt": "o", "pypdf": "s", "docling": "D", "multimodal": "^", "hybrid": "P"}
+# Label placement per route (points, alignment): routes sit close together in cost and
+# F1, so each gets its own side instead of an automatic offset that collides.
+LABEL_OFFSETS = {
+    "txt": ((-9, 6), "right"),
+    "pypdf": ((9, 6), "left"),
+    "docling": ((9, -14), "left"),
+    "multimodal": ((9, -14), "left"),
+    "hybrid": ((9, 6), "left"),
+}
+COST_TICKS = (0.0025, 0.005, 0.01, 0.02, 0.05, 0.1)
+OFF_SCALE_F1 = 0.2  # below this a route has collapsed: pin it to the edge, label it
 ROUTE_LABELS = {
     "txt": "CUAD txt",
     "pypdf": "pypdf",
@@ -101,17 +112,21 @@ def render(points: list[Point], out: Path, title: str) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
+    from matplotlib.ticker import FuncFormatter, NullFormatter
 
-    variants = ["clean", "scanned"]
-    from matplotlib.ticker import FuncFormatter
+    # Zoom to the routes that work; a collapsed route (F1 ~0, e.g. pypdf on scans) is pinned
+    # to the bottom edge with an explicit label instead of squashing everything into a sliver.
+    on_scale = [p for p in points if p.f1 >= OFF_SCALE_F1] or points
+    y_low = 100 * min((p.low for p in on_scale), default=0.5) - 2
+    y_high = min(100.0, 100 * max((p.high for p in on_scale), default=1.0) + 2)
+    dollars = FuncFormatter(lambda v, _: f"${v:.3g}")
 
     # Shared x and y: the two panels must be directly comparable.
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharex=True, sharey=True, facecolor=SURFACE)
-    lows = [p.low for p in points] or [0.5]
-    for ax, variant in zip(axes, variants, strict=True):
+    for ax, variant in zip(axes, ("clean", "scanned"), strict=True):
         ax.set_facecolor(SURFACE)
         panel = [p for p in points if p.variant == variant]
-        front = pareto_front(panel)
+        front = [p for p in pareto_front(panel) if p.f1 >= OFF_SCALE_F1]
         if len(front) > 1:
             ax.step(
                 [p.cost for p in front],
@@ -122,8 +137,30 @@ def render(points: list[Point], out: Path, title: str) -> None:
                 linestyle="--",
                 zorder=1,
             )
-        for p in panel:
+        for p in sorted(panel, key=lambda q: (q.cost, q.f1)):
             color = MODEL_COLORS.get(p.model, TEXT_SECONDARY)
+            name = ROUTE_LABELS.get(p.route, p.route)
+            if p.f1 < OFF_SCALE_F1:
+                ax.scatter(
+                    p.cost,
+                    y_low + 0.4,
+                    s=90,
+                    marker="v",
+                    color=color,
+                    edgecolors=SURFACE,
+                    linewidths=2,
+                    zorder=3,
+                    clip_on=False,
+                )
+                ax.annotate(
+                    f"{name}: F1 {100 * p.f1:.0f} (off scale)",
+                    (p.cost, y_low + 0.4),
+                    xytext=(8, 4),
+                    textcoords="offset points",
+                    fontsize=9,
+                    color=TEXT_PRIMARY,
+                )
+                continue
             ax.errorbar(
                 p.cost,
                 100 * p.f1,
@@ -145,21 +182,25 @@ def render(points: list[Point], out: Path, title: str) -> None:
                 linewidths=2,
                 zorder=3,
             )
-            label = ROUTE_LABELS.get(p.route, p.route) + (f" ({p.runs} runs)" if p.runs > 1 else "")
+            label = name + (f" ({p.runs} runs)" if p.runs > 1 else "")
+            offset, align = LABEL_OFFSETS.get(p.route, ((9, 6), "left"))
             ax.annotate(
                 label,
                 (p.cost, 100 * p.f1),
-                xytext=(7, 4),
+                xytext=offset,
                 textcoords="offset points",
+                ha=align,
                 fontsize=9,
                 color=TEXT_PRIMARY,
             )
         ax.set_xscale("log")
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v:g}"))
+        ax.set_xticks(COST_TICKS)
+        ax.xaxis.set_major_formatter(dollars)
+        ax.xaxis.set_minor_formatter(NullFormatter())
         ax.set_title(f"{variant} PDFs", fontsize=11, color=TEXT_PRIMARY, loc="left")
         ax.set_xlabel("total cost per contract, USD (log scale)", fontsize=9, color=TEXT_SECONDARY)
         ax.grid(True, which="major", color=GRID, linewidth=0.8)
-        ax.tick_params(colors=TEXT_SECONDARY, labelsize=8)
+        ax.tick_params(colors=TEXT_SECONDARY, labelsize=8, which="both")
         for spine in ax.spines.values():
             spine.set_visible(False)
         if not panel:
@@ -167,7 +208,9 @@ def render(points: list[Point], out: Path, title: str) -> None:
                 0.5, 0.5, "no runs yet", transform=ax.transAxes, ha="center", color=TEXT_SECONDARY
             )
     axes[0].set_ylabel("overall micro F1 (95% CI)", fontsize=9, color=TEXT_SECONDARY)
-    axes[0].set_ylim(max(0, 100 * min(lows) - 5), 100)
+    axes[0].set_ylim(y_low, y_high)
+    costs = [p.cost for p in points] or [0.005]
+    axes[0].set_xlim(min(costs) / 1.4, max(costs) * 1.6)
     handles = [
         Line2D(
             [], [], marker="o", linestyle="", color=c, markersize=8, label=m.replace("gpt-5.6-", "")

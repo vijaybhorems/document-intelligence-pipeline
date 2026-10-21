@@ -608,9 +608,7 @@ def pareto(
     from dip.eval.charts import collect_points, pareto_front, render
 
     points = collect_points(_paths()["runs"], split)
-    render(
-        points, out, f"Cost vs quality on the {split} set ({points and len(points)} configurations)"
-    )
+    render(points, out, f"Cost vs quality, {split} set: prompt v4, one call per contract")
     for p in sorted(points, key=lambda p: (p.variant, p.cost)):
         star = "*" if p in pareto_front([q for q in points if q.variant == p.variant]) else " "
         typer.echo(
