@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.9 |
+| **Status** | Draft v0.10 |
 | **Owner** | Vijay |
-| **Last updated** | 2026-10-20 |
+| **Last updated** | 2026-10-21 |
 | **Target platform** | Google Cloud (Cloud Run) |
 
 ---
@@ -121,8 +121,8 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 
 | # | Decision | Candidates | Experiment | Primary metrics | Phase |
 |---|---|---|---|---|---|
-| D1 | **Parser / extraction route** | pypdf (text layer only), Docling (layout + OCR), LlamaParse, **multimodal model reading the PDF directly** | §6.4 bake-off on the experiment set: clean PDFs **and** synthetic scans | per-type F1, cost/doc, p95 latency, failure rate | 6 |
-| D2 | **Extraction model** | ≥1 small/cheap and ≥1 large current model (OpenAI). Optionally an Anthropic model. | Same prompts and parser, experiment set | per-type F1, cost/doc, latency | 6 |
+| D1 | **Parser / extraction route** | pypdf (text layer only), Docling (layout + OCR), LlamaParse, **multimodal model reading the PDF directly** | §6.4 bake-off on the experiment set: clean PDFs **and** synthetic scans | per-type F1, cost/doc, p95 latency, failure rate | 6 · **decided: hybrid (pypdf for born-digital, multimodal for scans)** ([ADR](adr/D1-extraction-route.md)) |
+| D2 | **Extraction model** | ≥1 small/cheap and ≥1 large current model (OpenAI). Optionally an Anthropic model. | Same prompts and parser, experiment set | per-type F1, cost/doc, latency | 6 · **decided: gpt-5.6-luna** ([ADR](adr/D2-extraction-model.md)) |
 | D3 | **How much context to send** | full document · retrieved sections only · retrieved sections + definitions | §7.4 | recall per type (especially rare clauses), input tokens/doc | 5 · **decided: full** ([ADR](adr/D3-context-budget.md)) |
 | D4 | **Field grouping** | 1 call for all 41 fields · ~5 grouped calls · 1 call per field | Experiment set | F1, cost, latency | 3 · **decided: single call** ([ADR](adr/D4-field-grouping.md)) |
 | D5 | **Prompt strategy** | zero-shot definitions · + phrasing variants · + few-shot from train · + defined-terms injection | §7.2–7.3, ablation one step at a time | F1 overall + **non-canonical phrasing recall** (§10.6) | 5 · **decided: v4, all four** ([ADR](adr/D5-prompt-strategy.md)) |
@@ -144,7 +144,7 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 |---|---|---|---|
 | I1 | Orchestration framework | **Plain OpenAI SDK** for extraction. LlamaIndex for the retrieval variant (D3). | Structured Outputs via `client.responses.parse(..., text_format=Model)` is enough on its own. Adding a framework early hides the mechanics you're trying to learn. |
 | I2 | Sync vs async API | **Async jobs** (202 + polling), plus `?wait=true` for small docs | Long documents take minutes. Cloud Tasks gives retries, backoff, and rate limiting that protect the OpenAI quota. |
-| I3 | Separate api/worker images | **Yes** | Docling pulls in PyTorch and model weights, so the API should stay slim and cold-start fast. |
+| I3 | Separate api/worker images | **Yes** | Docling pulls in PyTorch and model weights, so the API should stay slim and cold-start fast. **Revised after D1:** the production route doesn't use Docling, so the worker can be slim too. Keep separate services anyway: they scale differently (API on requests, worker on queue depth). |
 | I4 | Job state store | **Firestore** (native mode) | Serverless, with single-document reads and writes. DuckDB isn't built for concurrent writers. |
 | I5 | Analytics store | **DuckDB over Parquet in GCS** | Cloud Run disks are ephemeral. JSON records are the source of truth, compacted into Parquet that DuckDB reads. Upgrade path: MotherDuck. |
 | I6 | IaC | **Terraform** | Reproducible environments, and an industry-standard skill. |
@@ -318,7 +318,7 @@ Create a `scanned` variant of the experiment set: rasterize each PDF page to an 
 
 - **Cache parsed output** at `parsed/{sha256}/{parser}-{version}.json`. Experiments never re-parse.
 - Limits: 25 MB and 300 pages. Above that, reject with `413`/`422`. Supported inputs are PDF, DOCX and TXT. Anything else gets `415`, and the check sniffs the MIME type rather than trusting the extension.
-- **Docling on Cloud Run:** bake model weights into the image at build time. Start the worker at 4 vCPU / 8 GiB with concurrency 1–2 and tune from measurements.
+- **Docling on Cloud Run:** bake model weights into the image at build time. Start the worker at 4 vCPU / 8 GiB with concurrency 1–2 and tune from measurements. **Not needed after D1:** the hybrid route uses pypdf and multimodal. Docling stays a dev dependency and an option. It also needs `onnxruntime` for RapidOCR and must fail loudly on conversion errors (Phase 6 found it silently skipping OCR).
 
 ### 6.6 Extensibility
 
@@ -590,7 +590,7 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 |---|---|
 | p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). |
 | p95 latency, non-processing endpoints | < 300 ms |
-| Median cost per document | set from the D1/D2 decision, then enforced in CI. Phase 3 measured **$0.0048** (gpt-5.6-luna, single call, CUAD txt, dev). |
+| Median cost per document | set from the D1/D2 decision, then enforced in CI. Phase 3 measured **$0.0048** (gpt-5.6-luna, single call, CUAD txt, dev). **After D1/D2:** about $0.0075 per born-digital contract and about $0.015 per scanned one (luna, prompt v4, experiment set). |
 | Job success rate (valid input) | ≥ 99% |
 
 ### 12.2 MCP interface (agent access)
@@ -900,6 +900,11 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.10 (2026-10-21), Phase 6:**
+  - D1 decided: hybrid route, with synthetic scans, Pareto chart and parsing priced at Cloud Run rates.
+  - D2 decided: luna; terra and sol cost 11–22× with no gain.
+  - I3 revised: worker no longer needs Docling.
 
 - **v0.9 (2026-10-20), Phase 5:**
   - D5 decided: prompt v4 (variants + examples with hard negatives + defined terms).
