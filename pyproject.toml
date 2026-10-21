@@ -6,13 +6,11 @@ readme = "README.md"
 authors = [{ name = "Vijay Bhore", email = "bhore.vijay@gmail.com" }]
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "docling>=2.141.0",
     "duckdb>=1.5.6",
     "httpx>=0.28.1",
     "llama-index-core>=0.14.25",
     "llama-index-embeddings-openai>=0.7.0",
     "numpy>=2.5.4",
-    "onnxruntime>=1.31.0",
     "openai>=3.35.1",
     "openinference-instrumentation-openai>=0.1.65",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
@@ -29,6 +27,12 @@ dependencies = [
 
 [project.scripts]
 dip = "dip.cli:app"
+
+[project.optional-dependencies]
+docling = [
+    "docling>=2.141.0",
+    "onnxruntime>=1.31.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.14"]

@@ -259,9 +259,14 @@ def _route(extractor: "OpenAIExtractor", route: str, variant: str, split: str) -
 
 def _parser(route: str) -> "Parser":
     if route == "docling":
-        from dip.parse.docling_parser import DoclingParser
+        try:
+            from dip.parse.docling_parser import DoclingParser
 
-        return DoclingParser()
+            return DoclingParser()
+        except ImportError as exc:  # optional extra: production doesn't need it (ADR D1, I3)
+            raise typer.BadParameter(
+                "Docling isn't installed: run `uv sync --extra docling`"
+            ) from exc
     from dip.parse.pypdf_parser import PypdfParser
 
     return PypdfParser()

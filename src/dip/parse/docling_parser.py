@@ -1,3 +1,5 @@
+# Docling is an optional extra (`uv sync --extra docling`); CI and production don't install it.
+# pyright: reportMissingImports=false
 """Docling: layout-aware parsing with OCR (SPEC §6.2, decision D1).
 
 Docling reads the PDF's text layer where one exists and runs OCR on image
@@ -13,25 +15,19 @@ several hundred MB of models, so build one parser and reuse it.
 import io
 import logging
 import time
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from dip.parse.base import PageSpan, ParsedDocument
+from dip.parse.pdf import MIN_LAYER_CHARS, text_layer_chars
 
 OCR_ENGINE = "rapidocr"
 
 
-MIN_LAYER_CHARS = 20
-
-
-def _text_layer_chars(data: bytes) -> list[int]:
-    """Characters in each page's embedded text layer (0 for a scanned page)."""
-    import pypdfium2 as pdfium
-
-    document = pdfium.PdfDocument(data)
+def _installed_version(package: str) -> str:
     try:
-        return [len(page.get_textpage().get_text_range().strip()) for page in document]
-    finally:
-        document.close()
+        return version(package)
+    except PackageNotFoundError:
+        return "not-installed"
 
 
 class ParseError(RuntimeError):
@@ -40,7 +36,8 @@ class ParseError(RuntimeError):
 
 class DoclingParser:
     name = "docling"
-    version = f"{version('docling')}+{OCR_ENGINE}"
+    # Docling is an optional extra (ADR D1); read its version without failing at import.
+    version = f"{_installed_version('docling')}+{OCR_ENGINE}"
 
     def __init__(self) -> None:
         from docling.datamodel.base_models import InputFormat
@@ -75,7 +72,7 @@ class DoclingParser:
             parts.append(text)
             offset += len(text) + 2
         # OCR happened if a page produced text although its PDF text layer is (nearly) empty.
-        layer = _text_layer_chars(data)
+        layer = text_layer_chars(data)
         ocr_used = any(
             layer[span.page - 1] < MIN_LAYER_CHARS and span.end > span.start
             for span in pages

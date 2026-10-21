@@ -56,7 +56,7 @@ def test_parse_cache_parses_once_per_content_and_version(tmp_path: Path) -> None
 
 
 def test_text_layer_chars_tells_born_digital_from_scanned() -> None:
-    from dip.parse.docling_parser import MIN_LAYER_CHARS, _text_layer_chars
+    from dip.parse.pdf import MIN_LAYER_CHARS, text_layer_chars
 
-    assert all(n >= MIN_LAYER_CHARS for n in _text_layer_chars(PDF))
-    assert all(n < MIN_LAYER_CHARS for n in _text_layer_chars(make_scan(PDF, "doc-1")))
+    assert all(n >= MIN_LAYER_CHARS for n in text_layer_chars(PDF))
+    assert all(n < MIN_LAYER_CHARS for n in text_layer_chars(make_scan(PDF, "doc-1")))

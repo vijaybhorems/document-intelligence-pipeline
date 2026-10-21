@@ -4,8 +4,8 @@
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
 
-install: ## Create .venv, install locked deps, install git hooks
-	uv sync --locked
+install: ## Create .venv, install locked deps (+ optional Docling), install git hooks
+	uv sync --locked --extra docling
 	uv run pre-commit install
 
 fmt: ## Auto-format and apply safe lint fixes
