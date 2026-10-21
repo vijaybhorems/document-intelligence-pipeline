@@ -182,7 +182,8 @@ def render(points: list[Point], out: Path, title: str) -> None:
                 linewidths=2,
                 zorder=3,
             )
-            label = name + (f" ({p.runs} runs)" if p.runs > 1 else "")
+            model = "" if p.model == "gpt-5.6-luna" else f", {p.model.replace('gpt-5.6-', '')}"
+            label = name + model + (f" ({p.runs} runs)" if p.runs > 1 else "")
             offset, align = LABEL_OFFSETS.get(p.route, ((9, 6), "left"))
             ax.annotate(
                 label,
