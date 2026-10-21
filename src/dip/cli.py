@@ -591,5 +591,26 @@ def parse(
     typer.echo(f"done in {total:.0f}s")
 
 
+@app.command()
+def pareto(
+    split: SplitOpt = "experiment",
+    out: Annotated[Path, typer.Option(help="PNG to write.")] = Path("docs/img/d1-d2-pareto.png"),
+) -> None:
+    """Cost-vs-F1 chart of every v4 route/model/variant run on a split (needs dev deps)."""
+    from dip.eval.charts import collect_points, pareto_front, render
+
+    points = collect_points(_paths()["runs"], split)
+    render(
+        points, out, f"Cost vs quality on the {split} set ({points and len(points)} configurations)"
+    )
+    for p in sorted(points, key=lambda p: (p.variant, p.cost)):
+        star = "*" if p in pareto_front([q for q in points if q.variant == p.variant]) else " "
+        typer.echo(
+            f"{star} {p.variant:7s} {p.route:10s} {p.model:14s} ${p.cost:.4f}  "
+            f"F1 {100 * p.f1:5.1f} [{100 * p.low:.0f}-{100 * p.high:.0f}]  runs={p.runs}"
+        )
+    typer.echo(f"Wrote {out}  (* = on the Pareto frontier)")
+
+
 if __name__ == "__main__":
     app()
