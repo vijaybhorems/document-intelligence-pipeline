@@ -12,3 +12,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # Base and emulator images, pinned by digest in docker/.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose
+    directory: /docker
+    schedule:
+      interval: weekly

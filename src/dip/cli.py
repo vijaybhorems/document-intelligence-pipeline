@@ -623,5 +623,48 @@ def pareto(
     typer.echo(f"Wrote {out}  (* = on the Pareto frontier)")
 
 
+# ── Phase 7: service ─────────────────────────────────────────────────────────
+
+
+@app.command()
+def submit(
+    files: Annotated[list[Path], typer.Argument(help="PDF or .txt contracts to upload.")],
+    api: Annotated[str, typer.Option(help="Service base URL.")] = "http://localhost:8080",
+    api_key: Annotated[
+        str | None, typer.Option(envvar="DIP_API_KEY", help="X-API-Key, if the service needs one.")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Re-extract even if already done.")] = False,
+    out: Annotated[Path | None, typer.Option(help="Directory to save each record as JSON.")] = None,
+) -> None:
+    """Upload contracts to a running service, wait, and summarise each record."""
+    import time
+
+    import httpx
+
+    from dip.service.client import submit as submit_one
+
+    headers = {"X-API-Key": api_key} if api_key else {}
+    total = 0.0
+    with httpx.Client(base_url=api, headers=headers, timeout=60) as client:
+        for path in files:
+            started = time.perf_counter()
+            job, record = submit_one(client, path, force=force)
+            p, f = record.provenance, record.fields
+            total += p.cost_usd
+            present = sum(c.present for _, c in f.clauses)
+            typer.echo(
+                f"{path.name[:50]:50s} {job['status']:19s} {time.perf_counter() - started:5.1f}s "
+                f"route={p.route} grounding={p.grounding} pages={p.pages} ${p.cost_usd:.4f}"
+            )
+            typer.echo(
+                f"  name={f.document_name.value!r} parties={[x.name for x in f.parties.parties]} "
+                f"clauses={present} issues={[i.code for i in record.validation_issues]}"
+            )
+            if out:
+                out.mkdir(parents=True, exist_ok=True)
+                (out / f"{record.record_id}.json").write_text(record.model_dump_json(indent=2))
+    typer.echo(f"total ${total:.4f}")
+
+
 if __name__ == "__main__":
     app()

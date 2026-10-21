@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from dip.eval.derive import problems_for, validate_run
+from dip.eval.derive import validate_run
 from dip.eval.runs import Prediction, load_meta, load_predictions, predict, score_run, spent_usd
 from dip.eval.validation_metrics import ValidationMetrics
 from dip.extract.system import SystemOutput, Usage
@@ -18,6 +18,7 @@ from dip.schema.domain import (
     ValidationIssue,
 )
 from dip.schema.llm import LLMClause
+from dip.validate.reask import problems_for
 from dip.validate.validator import Policy
 
 TEXT = "Licensee shall not assign this Agreement. Licensor may audit the books of Licensee."
@@ -116,7 +117,7 @@ def test_problems_for_maps_errors_and_extraction_issues_to_fields() -> None:
         )
     ]
 
-    problems = problems_for(prediction, issues)
+    problems = problems_for(prediction.fields, prediction.issues, issues)
 
     assert set(problems) == {"covenant_not_to_sue", "effective_date"}
     assert "waives all claims" in problems["covenant_not_to_sue"][0]

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.10 |
+| **Status** | Draft v0.11 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-21 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -144,7 +144,7 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 |---|---|---|---|
 | I1 | Orchestration framework | **Plain OpenAI SDK** for extraction. LlamaIndex for the retrieval variant (D3). | Structured Outputs via `client.responses.parse(..., text_format=Model)` is enough on its own. Adding a framework early hides the mechanics you're trying to learn. |
 | I2 | Sync vs async API | **Async jobs** (202 + polling), plus `?wait=true` for small docs | Long documents take minutes. Cloud Tasks gives retries, backoff, and rate limiting that protect the OpenAI quota. |
-| I3 | Separate api/worker images | **Yes** | Docling pulls in PyTorch and model weights, so the API should stay slim and cold-start fast. **Revised after D1:** the production route doesn't use Docling, so the worker can be slim too. Keep separate services anyway: they scale differently (API on requests, worker on queue depth). |
+| I3 | Separate api/worker images | **Yes** | Docling pulls in PyTorch and model weights, so the API should stay slim and cold-start fast. **Revised after D1:** the production route doesn't use Docling, so the worker can be slim too. Keep separate services anyway: they scale differently (API on requests, worker on queue depth). **Phase 7:** one image, two services; `DIP_ROLE=api|worker` picks the app. |
 | I4 | Job state store | **Firestore** (native mode) | Serverless, with single-document reads and writes. DuckDB isn't built for concurrent writers. |
 | I5 | Analytics store | **DuckDB over Parquet in GCS** | Cloud Run disks are ephemeral. JSON records are the source of truth, compacted into Parquet that DuckDB reads. Upgrade path: MotherDuck. |
 | I6 | IaC | **Terraform** | Reproducible environments, and an industry-standard skill. |
@@ -581,14 +581,16 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 | `GET /healthz`, `/readyz` | Liveness / readiness | `200` |
 
 - **Idempotency:** the same SHA-256 + pipeline version returns the cached record unless `?force=true`.
-- **Auth:** `X-API-Key` header with keys from Secret Manager. `/internal/*` accepts only the Cloud Tasks service account's OIDC token.
+- **Auth:** `X-API-Key` header with keys from Secret Manager. `/internal/*` accepts only the Cloud Tasks service account's OIDC token. With the HTTP queue that stands in for Cloud Tasks locally (docker compose), it takes a shared `X-Internal-Token` instead; the auth mode follows the queue, not the storage backend.
 - **Errors:** RFC 9457 `application/problem+json`. The request size limit is enforced while streaming the upload.
+- **Retries:** a job gets 3 attempts. Before the last, a failure puts the job back to `queued` and answers 5xx so the queue redelivers; the last failure marks it `failed` and answers 200 so the queue stops. Every queue, including the in-process one, redelivers the same way.
+- **Status (Phase 7):** everything in the table is implemented except `{gcs_uri}` uploads, `?route=` and the analytics endpoint (Phase 9). Job states: `queued → routing → extracting → validating → succeeded | partially_succeeded | failed`. `partially_succeeded` means a record exists but some fields failed validation even after the re-ask.
 
 ### 12.1 Non-functional targets (provisional; replace with measured values after Phase 6)
 
 | Metric | Target |
 |---|---|
-| p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). |
+| p95 end-to-end, 20-page born-digital PDF | < 90 s. Phase 3 extraction alone: p50 12.8 s, p95 16.8 s on dev (txt input, so no parsing yet). **Phase 7, first E2E (one 5-page contract, upload → record):** 13–14 s on both routes, locally and through compose; the queue and emulators add under a second. Real p95 comes from the Phase 9 load test. |
 | p95 latency, non-processing endpoints | < 300 ms |
 | Median cost per document | set from the D1/D2 decision, then enforced in CI. Phase 3 measured **$0.0048** (gpt-5.6-luna, single call, CUAD txt, dev). **After D1/D2:** about $0.0075 per born-digital contract and about $0.015 per scanned one (luna, prompt v4, experiment set). |
 | Job success rate (valid input) | ≥ 99% |
@@ -878,12 +880,13 @@ document_intelligence_pipeline/
 
 1. Is there a usable confidence signal (logprobs, self-consistency) for precision@recall curves?
 2. Strict span metric: Jaccard ≥ 0.5 or "pred contains gold"? Report both at first.
-3. Is a hybrid router (text-layer coverage → route) worth its complexity? It depends on the D1 results.
+3. ~~Is a hybrid router worth its complexity?~~ **Decided in Phase 6:** yes (ADR D1).
 4. Firestore vs GCS status objects (I4) at your scale?
 5. Keep DOCX in v1?
 6. ~~Partial gold dates~~ **Decided in Phase 2:** match on the components gold knows (§10.3).
 7. MCP: do your target clients support MCP's long-running task features yet, or is polling enough? And do they all accept a pre-registered OAuth client ID, or will you need the OAuth proxy fallback (ADR I8)? (The authorization server is decided: Google OAuth.)
 8. Will more than one organization ever connect via MCP? If so, add `owner_id` scoping before exposing `search_records`.
+9. **Stale jobs (found in Phase 7):** a job whose deliveries all fail (worker down longer than the queue retries) stays `queued` forever. The HTTP queue now logs `queue.gave_up`, and Cloud Tasks gives up too after its max attempts. Phase 9: a sweeper (Cloud Scheduler → Cloud Run Job) that re-enqueues jobs `queued` or in a running stage for longer than N minutes, plus an alert on `queue.gave_up`.
 
 ---
 
@@ -900,6 +903,13 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.11 (2026-10-21), Phase 7:**
+  - Service built: FastAPI API, worker, job model, local and GCP backends (GCS, Firestore, Cloud Tasks), docker compose with emulators.
+  - §12: internal auth follows the queue (OIDC from Cloud Tasks, shared token from the HTTP queue); retry semantics; implementation status.
+  - I3: one image, two services.
+  - §12.1: first end-to-end latency measurements.
+  - §20: stale jobs added as an open question for Phase 9.
 
 - **v0.10 (2026-10-21), Phase 6:**
   - D1 decided: hybrid route, with synthetic scans, Pareto chart and parsing priced at Cloud Run rates.
