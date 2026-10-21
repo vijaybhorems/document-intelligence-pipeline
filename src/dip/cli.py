@@ -235,7 +235,13 @@ def _pdf_paths(split: str, variant: str) -> dict[str, Path]:
 
 
 def _route(extractor: "OpenAIExtractor", route: str, variant: str, split: str) -> "System":
-    from dip.extract.routes import ROUTES, VARIANTS, MultimodalRoute, ParsedTextRoute
+    from dip.extract.routes import (
+        ROUTES,
+        VARIANTS,
+        HybridRoute,
+        MultimodalRoute,
+        ParsedTextRoute,
+    )
 
     if route not in ROUTES or variant not in VARIANTS:
         raise typer.BadParameter(f"--route one of {ROUTES}, --variant one of {VARIANTS}")
@@ -246,6 +252,8 @@ def _route(extractor: "OpenAIExtractor", route: str, variant: str, split: str) -
     pdfs = _pdf_paths(split, variant)
     if route == "multimodal":
         return MultimodalRoute(extractor, pdfs, variant)
+    if route == "hybrid":
+        return HybridRoute(extractor, pdfs, variant, _paths()["parsed"])
     return ParsedTextRoute(_parser(route), extractor, pdfs, variant, _paths()["parsed"])
 
 

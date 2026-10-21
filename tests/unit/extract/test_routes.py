@@ -86,3 +86,23 @@ def test_multimodal_estimate_counts_page_images() -> None:
 
 def test_compute_cost_is_priced_at_cloud_run_worker_rates() -> None:
     assert compute_usd(10.0) == pytest.approx(10 * (4 * 0.000024 + 8 * 0.0000025))
+
+
+def test_hybrid_routes_scans_to_vision_and_text_pdfs_to_text(tmp_path: Path) -> None:
+    from dip.extract.routes import HybridRoute
+    from dip.ingest.synth_scans import make_scan
+
+    text = text_pdf([["Distributor shall not assign this Agreement without prior consent."] * 6])
+    (tmp_path / "born.pdf").write_bytes(text)
+    (tmp_path / "scan.pdf").write_bytes(make_scan(text, "scan"))
+    pdfs = {"born": tmp_path / "born.pdf", "scan": tmp_path / "scan.pdf"}
+    responses = FakeResponses(ANSWERS)
+    route = HybridRoute(_extractor(responses), pdfs, "mixed", tmp_path / "parsed")
+
+    assert route.plan(["born", "scan"]) == {"born": "pypdf", "scan": "multimodal"}
+    out = route.predict_all({"born": "", "scan": ""})
+
+    assert "route: pypdf" in out["born"].issues
+    assert "route: multimodal" in out["scan"].issues
+    kinds = [type(c["input"][1]["content"]).__name__ for c in responses.calls]
+    assert sorted(kinds) == ["list", "str"]  # one PDF file input, one text input
