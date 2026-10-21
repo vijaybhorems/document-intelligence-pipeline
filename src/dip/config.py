@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     otel_endpoint: str | None = None
     trace_content: bool = True  # include prompt/response text in spans
 
+    @property
+    def queue_kind(self) -> str:
+        """How jobs reach the worker; it also decides how the worker authenticates them."""
+        return self.queue_backend or ("inline" if self.backend == "local" else "cloudtasks")
+
 
 @lru_cache
 def get_settings() -> Settings:

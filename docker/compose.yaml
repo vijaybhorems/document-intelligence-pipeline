@@ -1,14 +1,117 @@
-# Local observability. Start with:  docker compose -f docker/compose.yaml up -d phoenix
-# Then set DIP_OTEL_ENDPOINT=http://localhost:6006/v1/traces and open http://localhost:6006
+# The whole service on one machine, with GCP swapped for emulators (SPEC §12, Phase 7):
+#
+#   make up        build and start everything, wait until healthy
+#   make e2e       upload a contract, poll, fetch the record
+#   make down      stop and delete everything (emulator state is in memory)
+#
+# Same code path as Cloud Run: backend=gcp talks to GCS and Firestore through their
+# emulators. Cloud Tasks has no official emulator, so the HTTP queue stands in for it
+# (fire-and-forget, retries on 5xx) and the worker checks a shared token instead of OIDC.
+#
+# Every port is bound to 127.0.0.1. The default API key and internal token are
+# local-only test values; override them in .env.
+#
+# Phoenix alone (tracing for CLI eval runs):  docker compose -f docker/compose.yaml up -d phoenix
+
+x-dip: &dip
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: dip:local
+  environment: &dip-env
+    DIP_ENV: dev
+    DIP_LOG_LEVEL: INFO
+    DIP_BACKEND: gcp
+    DIP_GCS_BUCKET: dip-local
+    DIP_QUEUE_BACKEND: http
+    DIP_WORKER_URL: http://worker:8080
+    DIP_API_KEYS: ${DIP_API_KEYS:-local-dev-key}
+    DIP_INTERNAL_TOKEN: ${DIP_INTERNAL_TOKEN:-local-internal-token}
+    DIP_OTEL_ENDPOINT: http://phoenix:6006/v1/traces
+    GOOGLE_CLOUD_PROJECT: dip-local
+    STORAGE_EMULATOR_HOST: http://gcs:4443
+    FIRESTORE_EMULATOR_HOST: firestore:8085
+  read_only: true  # the app writes nothing to disk; storage is GCS and Firestore
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+x-healthcheck: &healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=2)"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+
 services:
-  phoenix:
-    image: arizephoenix/phoenix:version-20.23.0-nonroot
-    ports:
-      - "127.0.0.1:6006:6006"  # UI + OTLP/HTTP; bound to localhost only
-    volumes:
-      - phoenix-data:/mnt/data
+  api:
+    <<: *dip
     environment:
-      PHOENIX_WORKING_DIR: /mnt/data
+      <<: *dip-env
+      DIP_ROLE: api
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck: *healthcheck
+    depends_on:
+      worker: { condition: service_healthy }
+
+  worker:
+    <<: *dip
+    environment:
+      <<: *dip-env
+      DIP_ROLE: worker
+      # Only the worker calls OpenAI, so only the worker gets the key.
+      DIP_OPENAI_API_KEY: ${DIP_OPENAI_API_KEY:-}
+    healthcheck: *healthcheck
+    depends_on:
+      init: { condition: service_completed_successfully }
+      firestore: { condition: service_healthy }
+
+  # One-shot: create the bucket in the GCS emulator (Terraform does this in the cloud).
+  init:
+    <<: *dip
+    command:
+      - python
+      - -c
+      - |
+        import time
+        from google.api_core.exceptions import Conflict
+        from google.cloud import storage
+        for attempt in range(30):
+            try:
+                storage.Client().create_bucket("dip-local")
+                break
+            except Conflict:
+                break  # already there
+            except Exception:
+                time.sleep(1)
+        else:
+            raise SystemExit("GCS emulator never came up")
+        print("bucket dip-local ready")
+    depends_on: [gcs]
+
+  gcs:
+    image: fsouza/fake-gcs-server:1.56.1@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef
+    command: ["-scheme", "http", "-port", "4443", "-external-url", "http://gcs:4443", "-backend", "memory"]
+
+  firestore:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:587.0.0-emulators@sha256:8d8573471c489a409f03891d2c24d177fa531276184f7002b9a2d853d1b3ed54
+    command: ["gcloud", "emulators", "firestore", "start", "--host-port=0.0.0.0:8085", "--quiet"]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8085/"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  phoenix:
+    image: arizephoenix/phoenix:version-20.23.0-nonroot@sha256:ea0d33a28258db5e3fe46ea097d1441d0774e8b27557878296f809ccbffa7093
+    ports:
+      - "127.0.0.1:6006:6006"  # UI + OTLP/HTTP
+    # The image runs as uid 65532. A new named volume takes the owner of the directory it
+    # is mounted over, so mount it on the user's home: a fresh path would be root-owned.
+    volumes:
+      - phoenix-data:/home/nonroot
+    environment:
+      PHOENIX_WORKING_DIR: /home/nonroot/phoenix
 
 volumes:
   phoenix-data:

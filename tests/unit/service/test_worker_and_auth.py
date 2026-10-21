@@ -71,6 +71,36 @@ def test_gcp_internal_auth_accepts_the_invoker(
     assert seen["aud"] == settings.worker_url.rstrip("/")
 
 
+@pytest.mark.parametrize(
+    ("token", "headers", "status"),
+    [
+        (None, {"x-internal-token": "anything"}, 500),  # misconfigured: fail closed
+        ("s3cret", {"x-internal-token": "wrong"}, 401),
+        ("s3cret", {"authorization": "Bearer t"}, 401),  # OIDC is not accepted on this path
+    ],
+)
+def test_http_queue_on_gcp_requires_the_shared_token(
+    services: Services, token: str | None, headers: dict[str, str], status: int
+) -> None:
+    settings = services.settings.model_copy(
+        update={
+            "backend": "gcp",
+            "queue_backend": "http",
+            "internal_token": SecretStr(token) if token else None,
+        }
+    )
+    with pytest.raises(HTTPException) as err:
+        auth.check_internal(_Req(headers), settings)  # type: ignore[arg-type]
+    assert err.value.status_code == status
+
+
+def test_http_queue_on_gcp_accepts_the_shared_token(services: Services) -> None:
+    settings = services.settings.model_copy(
+        update={"backend": "gcp", "queue_backend": "http", "internal_token": SecretStr("s3cret")}
+    )
+    auth.check_internal(_Req({"x-internal-token": "s3cret"}), settings)  # type: ignore[arg-type]
+
+
 def test_api_keys_required_outside_local(services: Services) -> None:
     settings = services.settings.model_copy(update={"backend": "gcp"})
     with pytest.raises(HTTPException) as err:
@@ -82,3 +112,17 @@ def test_local_blob_store_refuses_keys_that_escape(tmp_path: Path) -> None:
     store = LocalBlobStore(tmp_path)
     with pytest.raises(ValueError, match="escapes"):
         store.put("../outside.txt", b"x", "text/plain")
+
+
+def test_worker_traces_for_its_lifetime(
+    services: Services, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dip.worker import app as worker_app
+
+    calls: list[str] = []
+    monkeypatch.setattr(worker_app, "configure_tracing", lambda *a: calls.append("start"))
+    monkeypatch.setattr(worker_app, "shutdown_tracing", lambda: calls.append("stop"))
+
+    with TestClient(create_app(services)):
+        assert calls == ["start"]
+    assert calls == ["start", "stop"]

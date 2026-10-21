@@ -2,9 +2,10 @@
 
 - Public API: ``X-API-Key`` checked against ``DIP_API_KEYS`` (constant-time compare).
   Unset keys disable the check, which is allowed only with the local backend.
-- ``/internal/*`` (the worker): locally, a shared ``X-Internal-Token``; on GCP, a
-  Google-signed OIDC token from Cloud Tasks whose audience is the worker URL and
-  whose email is the tasks invoker service account. Anything else is rejected.
+- ``/internal/*`` (the worker) depends on how jobs arrive. From Cloud Tasks: a
+  Google-signed OIDC token whose audience is the worker URL and whose email is the
+  tasks invoker service account. From the HTTP queue (docker compose): a shared
+  ``X-Internal-Token``, required outside the local backend. Anything else is rejected.
 """
 
 import hmac
@@ -31,10 +32,14 @@ def check_api_key(request: Request, settings: Settings) -> None:
 
 
 def check_internal(request: Request, settings: Settings) -> None:
-    if settings.backend == "local":
+    if settings.queue_kind != "cloudtasks":
         expected = settings.internal_token.get_secret_value() if settings.internal_token else ""
+        if not expected:
+            if settings.backend != "local":
+                raise HTTPException(500, "DIP_INTERNAL_TOKEN must be set outside the local backend")
+            return
         given = request.headers.get("x-internal-token", "")
-        if expected and not hmac.compare_digest(given, expected):
+        if not hmac.compare_digest(given, expected):
             raise HTTPException(401, "invalid internal token")
         return
     header = request.headers.get("authorization", "")

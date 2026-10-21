@@ -57,7 +57,7 @@ def build_services(
 
 
 def _queue(settings: Settings, process: Callable[[str], None]) -> TaskQueue:
-    kind = settings.queue_backend or ("inline" if settings.backend == "local" else "cloudtasks")
+    kind = settings.queue_kind
     token = settings.internal_token.get_secret_value() if settings.internal_token else None
     if kind == "inline":
         return InlineQueue(process)

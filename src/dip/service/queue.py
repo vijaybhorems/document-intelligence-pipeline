@@ -1,6 +1,7 @@
 """Task queue: how a job reaches the worker (SPEC §5, ADR I2).
 
-- ``InlineQueue``: runs the job in a background thread in the same process. Dev and tests.
+- ``InlineQueue``: runs the job in a background thread in the same process, redelivering
+  on failure like the others. Dev and tests.
 - ``HttpQueue``: POSTs to the worker's ``/internal/process`` with retries. docker compose.
 - ``CloudTasksQueue``: Cloud Tasks with an OIDC token for the worker. Production: retries,
   backoff and a dispatch rate cap that protects the OpenAI quota.
@@ -13,6 +14,9 @@ from collections.abc import Callable
 from typing import Protocol
 
 import httpx
+import structlog
+
+log = structlog.get_logger()
 
 
 class TaskQueue(Protocol):
@@ -20,12 +24,25 @@ class TaskQueue(Protocol):
 
 
 class InlineQueue:
-    def __init__(self, process: Callable[[str], None]) -> None:
+    def __init__(
+        self, process: Callable[[str], None], attempts: int = 3, backoff_s: float = 0.5
+    ) -> None:
         self._process = process
+        self.attempts = attempts
+        self.backoff_s = backoff_s
         self._threads: list[threading.Thread] = []
 
+    def _deliver(self, job_id: str) -> None:
+        # process_job raises to ask for a redelivery (a 5xx, to the real queues).
+        for attempt in range(self.attempts):
+            try:
+                self._process(job_id)
+                return
+            except Exception:  # already logged and recorded on the job by process_job
+                time.sleep(self.backoff_s * 2**attempt)
+
     def enqueue(self, job_id: str) -> None:
-        thread = threading.Thread(target=self._process, args=(job_id,), daemon=True)
+        thread = threading.Thread(target=self._deliver, args=(job_id,), daemon=True)
         self._threads.append(thread)
         thread.start()
 
@@ -45,16 +62,21 @@ class HttpQueue:
 
     def _deliver(self, job_id: str) -> None:
         headers = {"X-Internal-Token": self.token} if self.token else {}
-        for attempt in range(self.attempts):
+        for attempt in range(1, self.attempts + 1):
             try:
                 response = httpx.post(
                     self.url, json={"job_id": job_id}, headers=headers, timeout=600
                 )
                 if response.status_code < 500:
                     return
-            except httpx.HTTPError:
-                pass
-            time.sleep(2**attempt)
+                problem: str = f"HTTP {response.status_code}"
+            except httpx.HTTPError as exc:
+                problem = type(exc).__name__
+            log.warning("queue.delivery_failed", job_id=job_id, attempt=attempt, error=problem)
+            if attempt < self.attempts:
+                time.sleep(2 ** (attempt - 1))
+        # The job stays queued: nothing will pick it up again (see SPEC §20, stale jobs).
+        log.error("queue.gave_up", job_id=job_id, attempts=self.attempts)
 
     def enqueue(self, job_id: str) -> None:
         threading.Thread(target=self._deliver, args=(job_id,), daemon=True).start()

@@ -34,4 +34,5 @@ def services(tmp_path: Path, responses: FakeResponses) -> Services:
     settings = Settings(backend="local", service_dir=tmp_path / "service", wait_max_seconds=10)
     svc = build_services(settings, pipeline=make_pipeline(responses))
     assert isinstance(svc.queue, InlineQueue)
+    svc.queue.backoff_s = 0  # retries without the wait
     return svc

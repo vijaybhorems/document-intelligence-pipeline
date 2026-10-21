@@ -8,7 +8,7 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 
 ## Status
 
-Phase 6 (parser & model bake-off) complete: hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
+Phase 7 (service) complete: upload a contract to a FastAPI service, poll the job, and fetch a validated record, locally or in docker compose with GCP emulators. The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
 
 ## Quickstart
 
@@ -29,6 +29,8 @@ uv run dip --help
 | `make typecheck` | Pyright |
 | `make test` | Unit tests with coverage |
 | `make check` | Everything CI runs |
+| `make up` / `make down` | Start / stop the service stack (docker compose) |
+| `make e2e` | One contract through the running stack |
 
 ## Google Cloud setup (one-time)
 
@@ -72,6 +74,36 @@ uv run dip pareto --split experiment                                  # cost vs 
 Runs live in `data/runs/<run_id>/` (predictions, per-field results as Parquet, per-call `usage.jsonl`, report). Committed reports: [docs/results/](docs/results/).
 
 Tracing (optional): `docker compose -f docker/compose.yaml up -d phoenix`, set `DIP_OTEL_ENDPOINT=http://localhost:6006/v1/traces`, then open http://localhost:6006.
+
+## Service (Phase 7)
+
+The API takes a PDF or text contract and returns a job; a worker extracts, validates and stores a `ContractRecord`. Endpoints, auth and retry rules are in [SPEC §12](docs/SPEC.md#12-interfaces-rest-api-and-mcp).
+
+**Without Docker** (local backend: files on disk, jobs in memory, worker in-process):
+
+```bash
+DIP_ENV=dev uv run uvicorn dip.api.app:create_app --factory --port 8080
+uv run dip submit path/to/contract.pdf          # upload, poll, print a summary
+```
+
+**With docker compose** (the Cloud Run code path, with GCS and Firestore emulators, and the worker as its own container):
+
+```bash
+make up      # build and start; needs DIP_OPENAI_API_KEY in .env
+make e2e     # one CUAD contract end to end, about $0.01
+make logs
+make down
+```
+
+By hand:
+
+```bash
+curl -H 'X-API-Key: local-dev-key' -F file=@contract.pdf localhost:8080/v1/extractions
+curl -H 'X-API-Key: local-dev-key' localhost:8080/v1/extractions/<job_id>
+curl -H 'X-API-Key: local-dev-key' localhost:8080/v1/extractions/<job_id>/record
+```
+
+Interactive docs are at <http://localhost:8080/docs>, and traces at <http://localhost:6006> (Phoenix).
 
 ## Configuration
 
