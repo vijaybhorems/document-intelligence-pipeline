@@ -17,6 +17,15 @@ from dip.schema.domain import ContractFields, ValidationIssue, field_of, has_val
 from dip.schema.registry import FIELDS
 from dip.validate.validator import ground_all
 
+# Notes the routes add to ``issues`` that aren't failures: which route a contract took
+# ("route: pypdf") and parser warnings ("parse: 1/40 pages have almost no text layer").
+# Counting them made hybrid-route runs look 87% invalid (Phase 10).
+INFORMATIONAL = ("route:", "parse:")
+
+
+def is_failure(issue: str) -> bool:
+    return not issue.startswith(INFORMATIONAL)
+
 
 class ValidationMetrics(BaseModel):
     contracts: int = 0
@@ -60,7 +69,7 @@ def measure(
     codes: Counter[str] = Counter()
     for doc_id, gold_fields in gold.items():
         m.contracts += 1
-        m.contracts_valid += not extraction_issues.get(doc_id)
+        m.contracts_valid += not any(is_failure(i) for i in extraction_issues.get(doc_id, []))
         pred = predictions.get(doc_id)
         if pred is None:
             continue

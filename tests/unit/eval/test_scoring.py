@@ -262,3 +262,19 @@ def test_predict_score_report_round_trip(data_dir: Path, tmp_path: Path) -> None
     text = render(load_meta(run_dir), results)
     assert "## Headline by field type" in text
     assert "`anti_assignment`" in text
+
+
+def test_paired_delta_detects_a_consistent_improvement_and_not_noise() -> None:
+    from dip.eval.bootstrap import paired_delta
+
+    docs = [f"d{i}" for i in range(30)]
+    worse = [_result("anti_assignment", Metric.PRESENCE, Counts(tp=1, fp=1), d) for d in docs]
+    better = [_result("anti_assignment", Metric.PRESENCE, Counts(tp=1), d) for d in docs]
+
+    up = paired_delta(worse, better, lambda _: "all", iterations=300)["all"]
+    assert up.diff > 0
+    assert up.significant  # every contract improved: the CI excludes zero
+
+    same = paired_delta(worse, worse, lambda _: "all", iterations=300)["all"]
+    assert same.diff == 0
+    assert not same.significant

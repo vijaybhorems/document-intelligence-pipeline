@@ -531,12 +531,49 @@ Connecting MCP Inspector to the deployed server surfaced four bugs no unit test 
 
 ---
 
+## Phase 10: the final test
+
+### One run per finalist on untouched data
+
+The test set (102 contracts) was used **once per finalist**, at the very end:
+- production on born-digital PDFs;
+- production on synthetic scans;
+- the keyword baseline.
+
+**Results:**
+
+| Finalist | Overall micro F1 |
+|---|---|
+| Production, born-digital | **84.0 [82–86]** |
+| Production, scans | 82.8 |
+| Keyword | 54.0 |
+
+Production beats keyword by **+30.0 [+26.5, +34.1]**. Test agrees with dev (82.7) and experiment (83.6), the evidence that the design wasn't overfit to the sets it was tuned on.
+
+**How to say it:** "I froze the test set before the first experiment and scored it once per finalist. The held-out number matches the tuning sets, so the gains are real, not tuned to the data."
+
+### Small effects need big samples
+
+Scanning cost **−0.3 (within noise) on 30 contracts** and **−1.2 [−2.3, −0.1] (significant) on 102**.
+
+**Why it matters:** the effect didn't appear; the instrument got precise enough to see it. "Within noise" means "too small for this sample", not "zero".
+
+### Don't fix what you found on test
+
+The error analysis found a one-line fix worth 18 points of governing-law precision: the model adds "United States" beside a state. It was spotted in test results, so it is **not** applied to the test numbers. Re-scoring test after a fix would be tuning on test. It's the first item for the next iteration, measured on dev.
+
+### Measured error is not all model error
+
+Reading 50 errors by hand found **13 suspected label-noise cases**, 8 of them clear-cut, where the contract text qualifies but gold says it doesn't. So clause precision (71) is a **lower bound**. The honest move: report against gold unchanged, and say so.
+
+---
+
 ## Cross-cutting themes (good closing answers)
 
 **Cost:**
 - **Measured, not guessed:** every paid call is ledgered as it happens, with an estimate and a budget guard before each run.
 - **Final economics:** about **$0.006 per born-digital contract** in production; idle infrastructure costs about $0.50 a month (everything scales to zero).
-- **The whole project's LLM spend so far:** about $17 of a $20 budget.
+- **The whole project's LLM spend:** about $19.20 of a $20 budget, every experiment and the final test included.
 
 **Security:**
 - **No long-lived Google credentials anywhere:** Workload Identity for CI, service-account identity for services and DuckDB. The keys that must be long-lived (OpenAI, Arize, the REST API keys) live only in Secret Manager, readable by the one service that needs each.
@@ -582,6 +619,8 @@ Answer each out loud in under a minute, then check against the section above.
 22. What is SSRF, and why does `submit_extraction` need a guard?
 23. How can a contract attack the *agent* that reads your tool results?
 24. Name a bug that only appeared in the real environment, and how you'd catch it earlier next time.
+25. Why is the test set scored only once per finalist, and why isn't the governing-law fix in the final numbers?
+26. Scanning was "within noise" on 30 contracts and significant on 102. Explain.
 
 ---
 
