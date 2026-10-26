@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.14 |
+| **Status** | v1.0: all phases complete |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-21 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -954,6 +954,11 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v1.0 (2026-10-26), Phase 10:**
+  - Final test-set runs: production 84.0 micro F1 [82–86] on born-digital PDFs, 82.8 on scans, keyword 54.0.
+  - Results in [`docs/results.md`](results.md); error analysis of 50 dev errors.
+  - Valid-output metric no longer counts route notes; budget estimates price hybrid scans as images.
 
 - **v0.14 (2026-10-21), Phase 9.5:**
   - MCP server built: shared service layer, Google OAuth resource server, SSRF guard, spend caps, injection fixtures.

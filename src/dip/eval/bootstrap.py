@@ -79,3 +79,71 @@ def bootstrap(
         }
         for kind, by_key in samples.items()
     }
+
+
+@dataclass(frozen=True)
+class Delta:
+    """Micro-F1 difference ``b - a`` on the same contracts, with a 95% CI."""
+
+    diff: float
+    low: float
+    high: float
+
+    @property
+    def significant(self) -> bool:
+        return self.low > 0 or self.high < 0
+
+
+def paired_delta(
+    a: Iterable[FieldResult],
+    b: Iterable[FieldResult],
+    group_of: Callable[[str], str | None],
+    metric: Metric | None = None,
+    iterations: int = 2000,
+    seed: int = DEFAULT_SEED,
+) -> dict[str, Delta]:
+    """Paired bootstrap: resample contracts once, score *both* systems on that sample.
+
+    Pairing cancels contract difficulty: a hard sample lowers both scores together, so
+    the CI reflects the systems' difference, not the sample's. Only contracts scored by
+    both systems are used.
+    """
+
+    def by_doc(results: Iterable[FieldResult]) -> dict[str, dict[str, Counts]]:
+        out: dict[str, dict[str, Counts]] = defaultdict(lambda: defaultdict(Counts))
+        for r in results:
+            if wants(r, metric):
+                out[r.doc_id][r.field] += r.counts
+        return out
+
+    da, db = by_doc(a), by_doc(b)
+    docs = sorted(set(da) & set(db))
+
+    def micro(per_doc: dict[str, dict[str, Counts]], sample: list[str]) -> dict[str, float]:
+        totals: dict[str, Counts] = defaultdict(Counts)
+        for doc in sample:
+            for field, counts in per_doc[doc].items():
+                totals[field] += counts
+        return {
+            g: s.micro_f1
+            for g, s in aggregate(dict(totals), group_of).items()
+            if s.micro_f1 is not None
+        }
+
+    point_a, point_b = micro(da, docs), micro(db, docs)
+    rng = random.Random(seed)  # noqa: S311 (resampling, not security)
+    diffs: dict[str, list[float]] = defaultdict(list)
+    for _ in range(iterations):
+        sample = rng.choices(docs, k=len(docs))
+        sa, sb = micro(da, sample), micro(db, sample)
+        for g in sa.keys() & sb.keys():
+            diffs[g].append(sb[g] - sa[g])
+    return {
+        g: Delta(
+            point_b[g] - point_a[g],
+            _percentile(sorted(diffs[g]), 0.025),
+            _percentile(sorted(diffs[g]), 0.975),
+        )
+        for g in point_a.keys() & point_b.keys()
+        if diffs[g]
+    }

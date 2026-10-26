@@ -106,3 +106,13 @@ def test_hybrid_routes_scans_to_vision_and_text_pdfs_to_text(tmp_path: Path) -> 
     assert "route: multimodal" in out["scan"].issues
     kinds = [type(c["input"][1]["content"]).__name__ for c in responses.calls]
     assert sorted(kinds) == ["list", "str"]  # one PDF file input, one text input
+
+
+def test_estimate_prices_only_the_listed_contracts_as_page_images() -> None:
+    # The hybrid route lists only its scans; the rest are priced as text.
+    ex = _extractor(FakeResponses({}))
+    text_only = estimate(ex, {"born": TEXT, "scan": TEXT})
+    mixed = estimate(ex, {"born": TEXT, "scan": TEXT}, pdf_pages={"scan": 3})
+    all_images = estimate(ex, {"born": TEXT, "scan": TEXT}, pdf_pages={"born": 3, "scan": 3})
+
+    assert text_only.input_tokens < mixed.input_tokens < all_images.input_tokens

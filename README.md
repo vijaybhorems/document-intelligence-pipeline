@@ -5,11 +5,16 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 - **Spec:** [docs/SPEC.md](docs/SPEC.md)
 - **Decisions:** [docs/adr/](docs/adr/)
 - **Phase notes:** [docs/notes/](docs/notes/)
+- **Results** (the final report): [docs/results.md](docs/results.md)
 - **Design guide** (every decision, and how to defend it): [docs/design-guide.md](docs/design-guide.md)
 
 ## Status
 
-Phase 9.5 (MCP interface) complete: agents can search and cite the contracts through an MCP server, locally (Claude Desktop, stdio) or on Cloud Run with Google OAuth. With gold records, the same agent answers 93% of the task set; with ours, 64%. The gap is extraction, not tool design ([ADR D8](docs/adr/D8-mcp-tool-design.md)). The service runs on Google Cloud Run (dev), built with Terraform and deployed from GitHub Actions without stored keys. Records are compacted hourly into a Parquet lake that DuckDB queries straight from GCS, behind whitelisted `/v1/analytics` queries. Load-tested with 50 contracts: p95 63 s end to end for a ~20-page contract, 160 ms for status calls, $0.0061 median per contract, 50/50 succeeded ([numbers](docs/SPEC.md#121-non-functional-targets-measured)). The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
+**Complete (Phase 10).** On 102 held-out CUAD contracts, scored once:
+- **Accuracy:** **84.0 micro F1 [82–86]** across 41 fields (P 79.0 / R 89.7), against 54.0 for a keyword baseline; 82.8 on synthetic scans.
+- **Grounding:** 0 hallucinated values among 640 false positives.
+- **Cost:** $0.008 per contract.
+- **Deployed** on Google Cloud Run with Terraform and keyless CI/CD, with REST, analytics and an MCP interface for AI agents. The full story is in **[docs/results.md](docs/results.md)**.
 
 ## Quickstart
 

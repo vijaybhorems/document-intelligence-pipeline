@@ -309,7 +309,7 @@ def _budget_check(system: object, split: str, max_cost: float | None) -> float |
     from dip.eval.runs import spent_usd, split_texts
     from dip.extract.estimate import estimate
     from dip.extract.extractor import OpenAIExtractor
-    from dip.extract.routes import MultimodalRoute
+    from dip.extract.routes import HybridRoute, MultimodalRoute
 
     # Routes wrap an extractor; the budget check must see through them.
     extractor = (
@@ -320,11 +320,14 @@ def _budget_check(system: object, split: str, max_cost: float | None) -> float |
     remaining = get_settings().budget_usd - spent_usd(_paths()["runs"])
     cap = remaining if max_cost is None else min(remaining, max_cost)
     texts = split_texts(get_settings().data_dir, split)
-    pages = (
-        {d: len(PdfReader(p).pages) for d, p in system.pdfs.items()}
-        if isinstance(system, MultimodalRoute)
-        else None
-    )
+    pages: dict[str, int] | None = None
+    if isinstance(system, MultimodalRoute):
+        pages = {d: len(PdfReader(p).pages) for d, p in system.pdfs.items()}
+    elif isinstance(system, HybridRoute):
+        # Price each contract the way the route will send it: scans as page images. Before
+        # this, hybrid runs on scans were estimated as text (2.3x low on the test split).
+        vision = [d for d, r in system.plan(list(system.pdfs)).items() if r == "multimodal"]
+        pages = {d: len(PdfReader(system.pdfs[d]).pages) for d in vision}
     est = estimate(extractor, texts, pages)
     typer.echo(
         f"estimate: {est.contracts} contracts, {est.calls} calls, "
@@ -343,7 +346,7 @@ def estimate(
     system: SystemOpt = "llm",
     split: SplitOpt = "dev",
     model: ModelOpt = None,
-    strategy: StrategyOpt = "grouped",
+    strategy: StrategyOpt = "single",  # decision D4
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
@@ -388,7 +391,7 @@ def predict(
     system: SystemOpt,
     split: SplitOpt = "dev",
     model: ModelOpt = None,
-    strategy: StrategyOpt = "grouped",
+    strategy: StrategyOpt = "single",  # decision D4
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
@@ -468,7 +471,7 @@ def eval_cmd(
     system: SystemOpt,
     split: SplitOpt = "dev",
     model: ModelOpt = None,
-    strategy: StrategyOpt = "grouped",
+    strategy: StrategyOpt = "single",  # decision D4
     effort: EffortOpt = None,
     own_schema: OwnSchemaOpt = False,
     prompt_version: PromptOpt = None,
