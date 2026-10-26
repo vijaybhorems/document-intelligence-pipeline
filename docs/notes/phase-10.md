@@ -69,7 +69,11 @@
 
 ## Screenshots
 
-Captured from the repository's own data (charts and a sample record) and from the live systems; see the table at the end of [`results.md`](../results.md).
+All of SPEC §15.2 is captured except the Arize *experiment comparison* (eval runs were compared in the repo's reports, not as Arize experiments):
+- **From the repo's own data:** charts and a sample record.
+- **From the live systems:** an Arize trace, Cloud Run, MCP Inspector, and two Claude Desktop answers.
+
+See the table at the end of [`results.md`](../results.md). In the Delaware answer, Claude flags dev-42 as a borderline match and notes the 'United States' pair: the error analysis's two findings, spotted by the agent from the quotes alone.
 
 ## My answers
 

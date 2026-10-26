@@ -269,6 +269,12 @@ Every value carries its quote, and every quote was found in the contract. The re
 
 **Total spend for the whole project, every experiment included: about $19.20 of a $20 budget.**
 
+![Cloud Run: three services and two scheduled jobs in dev](img/cloud-run.png)
+
+**Tracing:** every job is one trace in Arize. The service span (`POST /internal/process`) contains the extraction span (`extract.contract`), which contains the OpenAI call, with its prompt, latency (12.9 s), tokens (64,158) and cost ($0.0174) for this 41-page contract.
+
+![Arize trace of one contract](img/arize-trace.webp)
+
 **What I'd do next:**
 1. **Normalizer fixes:** drop "United States" beside a state (governing-law precision 80.6 → 98.9 on test), and strip "a Nevada corporation"-style descriptors from party names. Free and systematic.
 2. **Hard negatives for the over-triggers** in §7, re-measured on dev with two runs for the noise floor (~$1).
@@ -306,10 +312,22 @@ The +29-point gap [13, 47] is **extraction, not tool design**: 7 of the 9 failin
   - *Outbound:* document text reaches the agent only inside capped quote fields described as untrusted data.
 - **Spend:** a per-person rate limit and daily cap, reserved before a job is enqueued; an audit log of every tool call.
 
+![MCP Inspector connected to the deployed dip-mcp](img/mcp-inspector-tools.webp)
+
 **Verified with real clients:**
 - **Local:** Claude Desktop answered task-set questions with citations.
 - **Remote:** MCP Inspector connected to the deployed server through Google sign-in. "Delaware contracts with change of control" returned 4 contracts, every quote verbatim from the right contract.
 - **That test found four bugs no unit test had:** host checks, a held-open stream, a cold start over budget, and a stale lake. All fixed and tested.
+
+**Claude Desktop, over stdio, against the 80 dev contracts:**
+
+![Claude Desktop: Delaware contracts with a change-of-control clause](img/claude-desktop-delaware.webp)
+
+Claude made **one** `search_records` call with both conditions, as the v2 descriptions ask, and quoted each clause. It also flagged on its own that **dev-42 is "a borderline match"**: the quote is an assignment clause, not a change-of-control obligation, and gold agrees. It also noticed the "Delaware" + "United States" governing-law pair. That's the two errors §7 found, spotted by the agent from the evidence alone, which is what returning quotes is for.
+
+![Claude Desktop: when contract dev-01 expires](img/claude-desktop-expiry.png)
+
+For a date, it cites both the term clause and the effective-date clause, and reads "whichever is later" correctly: the extracted date is the *earliest* end, not a fixed one.
 
 ---
 
@@ -322,10 +340,10 @@ The +29-point gap [13, 47] is **extraction, not tool design**: 7 of the 9 failin
 | Pareto charts, clean and scanned | ✅ [`img/d1-d2-pareto.png`](img/d1-d2-pareto.png) |
 | phrasing-slice chart | ✅ [`img/final-phrasing.png`](img/final-phrasing.png) |
 | sample JSON record with evidence | ✅ §6 |
-| Arize trace of one document | pending: `img/arize-trace.png` |
-| Cloud Run service page | pending: `img/cloud-run.png` |
-| MCP Inspector tool list | pending: `img/mcp-inspector-tools.png` |
-| Claude Desktop answering with citations | pending: `img/claude-desktop.png` |
+| Arize trace of one document | ✅ [`img/arize-trace.webp`](img/arize-trace.webp) |
+| Cloud Run service page | ✅ [`img/cloud-run.png`](img/cloud-run.png) |
+| MCP Inspector tool list | ✅ [`img/mcp-inspector-tools.webp`](img/mcp-inspector-tools.webp): the deployed `dip-mcp`, after Google sign-in |
+| Claude Desktop answering with citations | ✅ [`img/claude-desktop-delaware.webp`](img/claude-desktop-delaware.webp), [`img/claude-desktop-expiry.png`](img/claude-desktop-expiry.png) |
 | Arize experiment comparison | **not built:** eval runs were compared in the repo's own reports and charts, not as Arize experiments |
 
 ---
