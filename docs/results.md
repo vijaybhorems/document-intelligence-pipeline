@@ -271,7 +271,7 @@ Every value carries its quote, and every quote was found in the contract. The re
 
 ![Cloud Run: three services and two scheduled jobs in dev](img/cloud-run.png)
 
-**Tracing:** every job is one trace in Arize. The service span (`POST /internal/process`) contains the extraction span (`extract.contract`), which contains the OpenAI call, with its prompt, latency (12.9 s), tokens (64,158) and cost ($0.0174) for this 41-page contract.
+**Tracing:** every job is one trace in Arize. The service span (`POST /internal/process`) contains the extraction span (`extract.contract`), which contains the OpenAI call, with its prompt, latency (12.9 s) and tokens (64,158) for this 41-page contract. Cost is taken from our own ledger ($0.0142), not from the trace view, which prices calls with Arize's own rate table.
 
 ![Arize trace of one contract](img/arize-trace.webp)
 
