@@ -51,7 +51,8 @@ def _tokens(text: str) -> int:
 def estimate(
     extractor: OpenAIExtractor, texts: dict[str, str], pdf_pages: dict[str, int] | None = None
 ) -> Estimate:
-    """Cost before running. ``pdf_pages`` switches to the multimodal route (page images)."""
+    """Cost before running. Contracts listed in ``pdf_pages`` are priced as page images
+    (multimodal route); the rest as text. The hybrid route lists only its scans."""
     from dip.extract.extractor import call_plan
 
     price = price_of(extractor.model)
@@ -81,7 +82,7 @@ def estimate(
 
     input_tokens = cacheable = 0
     for doc_id, text in texts.items():
-        if pdf_pages is not None:
+        if pdf_pages is not None and doc_id in pdf_pages:
             prefix = system + INPUT_TOKENS_PER_PDF_PAGE * pdf_pages[doc_id]
         else:
             prefix = system + sum(
