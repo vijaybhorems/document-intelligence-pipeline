@@ -1,9 +1,7 @@
 """The public API (SPEC §12). Run: ``uvicorn dip.api.app:create_app --factory``."""
 
 import asyncio
-import hashlib
 import time
-import uuid
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -16,11 +14,11 @@ from dip.analytics.queries import QUERIES, QueryError
 from dip.config import Environment, get_settings
 from dip.observability.logging import configure_logging
 from dip.schema.domain import ContractRecord
-from dip.service import problems
+from dip.service import extractions, problems
 from dip.service.auth import check_api_key
 from dip.service.backends import Services, build_services
 from dip.service.jobs import Job, JobStatus, now
-from dip.service.uploads import EXTENSIONS, UploadError, check
+from dip.service.uploads import UploadError
 
 
 class Accepted(BaseModel):
@@ -59,11 +57,10 @@ def create_app(services: Services | None = None) -> FastAPI:
         )
 
     def load_record(job: Job) -> ContractRecord:
-        if job.status is JobStatus.FAILED:
-            raise HTTPException(409, f"job failed: {job.error}")
-        if not job.status.done or job.record_key is None:
-            raise HTTPException(409, f"job is {job.status.value}; poll the status URL")
-        return ContractRecord.model_validate_json(svc.blobs.get(job.record_key))
+        try:
+            return extractions.record_for_job(svc, job)
+        except extractions.ServiceError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
 
     @app.get("/health", include_in_schema=False)
     def health() -> dict[str, str]:
@@ -93,47 +90,24 @@ def create_app(services: Services | None = None) -> FastAPI:
                 413, "Document too large", f"limit is {svc.settings.max_upload_mb} MB"
             )
         data = await file.read(limit + 1)  # never buffer more than the limit
-        upload = check(data, svc.settings.max_upload_mb, svc.settings.max_pages)
-        sha = hashlib.sha256(data).hexdigest()
-
-        if idempotency_key and (
-            prior := await run_in_threadpool(svc.jobs.find_by_idempotency_key, idempotency_key)
-        ):
-            if prior.document_sha256 != sha:
-                raise HTTPException(
-                    409, "Idempotency-Key was already used for a different document"
-                )
-            return accepted(prior, deduplicated=True)
-        version = svc.pipeline.version
-        if not force and (reuse := await run_in_threadpool(svc.jobs.find_reusable, sha, version)):
-            return await _respond(reuse, wait=wait, deduplicated=True)
-
-        # Backpressure: past the backlog cap, refuse new work instead of queueing it for
-        # hours. Cheap to check (one aggregation query) and only on new jobs.
-        cap = svc.settings.max_queued_jobs
-        if cap and await run_in_threadpool(svc.jobs.count_queued) >= cap:
-            raise HTTPException(
-                429, f"{cap} jobs are already waiting; retry later", headers={"Retry-After": "60"}
+        try:
+            submission = await run_in_threadpool(
+                extractions.submit,
+                svc,
+                data,
+                filename or file.filename or "document",
+                idempotency_key=idempotency_key,
+                force=force,
             )
-        key = f"raw/{sha}.{EXTENSIONS[upload.mime]}"
-        if not await run_in_threadpool(svc.blobs.exists, key):
-            await run_in_threadpool(svc.blobs.put, key, data, upload.mime)
-        created = now()
-        job = Job(
-            job_id=str(uuid.uuid4()),
-            created_at=created,
-            updated_at=created,
-            document_sha256=sha,
-            document_key=key,
-            mime=upload.mime,
-            filename=(filename or file.filename or "document")[:200],
-            pages=upload.pages,
-            pipeline_version=version,
-            idempotency_key=idempotency_key,
-        )
-        await run_in_threadpool(svc.jobs.create, job)
-        await run_in_threadpool(svc.queue.enqueue, job.job_id)
-        return await _respond(job, wait=wait)
+        except extractions.BusyError as exc:
+            raise HTTPException(
+                429, str(exc), headers={"Retry-After": str(exc.retry_after_s)}
+            ) from exc
+        except extractions.ServiceError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+        if submission.deduplicated and idempotency_key:
+            return accepted(submission.job, deduplicated=True)
+        return await _respond(submission.job, wait=wait, deduplicated=submission.deduplicated)
 
     async def _respond(
         job: Job, wait: bool, deduplicated: bool = False

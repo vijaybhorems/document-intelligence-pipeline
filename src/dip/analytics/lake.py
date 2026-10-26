@@ -42,6 +42,11 @@ from dip.service.blobs import BlobInfo, BlobStore
 log = structlog.get_logger()
 
 PARQUET = "application/vnd.apache.parquet"
+# Bump when a table's columns change: compaction then rebuilds every partition. Without
+# it, partitions written by older code keep the old columns (Phase 9.5: search_records
+# failed on a lake compacted before ``quote``/``page`` existed).
+LAKE_VERSION = "2"
+VERSION_KEY = "lake/_version"
 
 # Column order and types are the tables' contract with analytics/queries; both read from here.
 RECORDS: dict[str, str] = {
@@ -81,7 +86,10 @@ RECORD_FIELDS: dict[str, str] = {
     "value_date": "DATE",
     "grounded": "BOOLEAN",  # all quotes found in the text; NULL if unchecked or no quotes
     "evidence_count": "INTEGER",
+    "quote": "VARCHAR",  # the first quote, capped at QUOTE_CHARS: lets search cite without a fetch
+    "page": "INTEGER",
 }
+QUOTE_CHARS = 1000
 EVAL_RUNS: dict[str, str] = {
     "run_id": "VARCHAR",
     "created_at": "TIMESTAMPTZ",
@@ -123,7 +131,7 @@ EVAL_FIELD_RESULTS: dict[str, str] = {
 # ---------------------------------------------------------------- rows
 
 
-def _value_text(value: FieldValue) -> str | None:
+def value_text(value: FieldValue) -> str | None:
     match value:
         case TextField():
             return value.value
@@ -194,10 +202,12 @@ def field_rows(record: ContractRecord) -> list[dict[str, Any]]:
                 "clause_family": spec.group.value,
                 "present": is_present(value),
                 "has_value": has_value(value),
-                "value_text": _value_text(value),
+                "value_text": value_text(value),
                 "value_date": first_date,
                 "grounded": _grounded(value),
                 "evidence_count": len(value.evidence),
+                "quote": value.evidence[0].quote[:QUOTE_CHARS] if value.evidence else None,
+                "page": value.evidence[0].page if value.evidence else None,
             }
         )
     return rows
@@ -252,6 +262,11 @@ def compact(blobs: BlobStore, force: bool = False) -> CompactionReport:
         if (day := _partition(info.key)) is not None:
             by_day[day].append(info)
     built = {b.key: b.updated for b in blobs.list("lake/records/")}
+    if not force and (
+        not blobs.exists(VERSION_KEY) or blobs.get(VERSION_KEY).decode() != LAKE_VERSION
+    ):
+        force = True
+        log.info("lake.layout_changed", version=LAKE_VERSION)
 
     report = CompactionReport()
     for day, sources in sorted(by_day.items()):
@@ -271,6 +286,8 @@ def compact(blobs: BlobStore, force: bool = False) -> CompactionReport:
         report.partitions_rebuilt.append(day)
         report.records += len(records)
         log.info("lake.partition_rebuilt", dt=day, records=len(records))
+    if not blobs.exists(VERSION_KEY) or blobs.get(VERSION_KEY).decode() != LAKE_VERSION:
+        blobs.put(VERSION_KEY, LAKE_VERSION.encode(), "text/plain")
     return report
 
 

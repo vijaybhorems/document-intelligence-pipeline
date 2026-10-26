@@ -51,6 +51,11 @@ jobs:
             gcloud run deploy "$service" --image "$DIGEST" \
               --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
           done
+          # dip-mcp exists only once its OAuth client is configured (infra/terraform/mcp.tf).
+          if gcloud run services describe dip-mcp --region "$GCP_REGION" --project "$GCP_PROJECT" >/dev/null 2>&1; then
+            gcloud run deploy dip-mcp --image "$DIGEST" \
+              --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
+          fi
           # Scheduled jobs pick up the same image on their next run.
           for job in dip-compactor dip-sweeper; do
             gcloud run jobs update "$job" --image "$DIGEST" \

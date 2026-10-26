@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from dip.extract.extractor import OpenAIExtractor
     from dip.extract.retrieval import Retriever
     from dip.extract.system import System
+    from dip.mcp_server.auth import FirestorePrincipalStore
     from dip.parse.base import Parser
 
 app = typer.Typer(help="Document intelligence pipeline.", no_args_is_help=True)
@@ -756,6 +757,169 @@ def query(
     typer.echo("\t".join(result.columns))
     for row in result.rows:
         typer.echo("\t".join("" if v is None else str(v) for v in row.values()))
+
+
+# ── Phase 9.5: MCP ───────────────────────────────────────────────────────────
+
+
+@app.command("mcp-stdio")
+def mcp_stdio(
+    store: Annotated[Path, typer.Option(help="Local service store (records, lake).")] = Path(
+        "data/mcp-store/normal"
+    ),
+    descriptions: Annotated[str, typer.Option(help="Tool descriptions version.")] = "v2",
+    granularity: Annotated[str, typer.Option(help="coarse | fine")] = "coarse",
+) -> None:
+    """Serve MCP over stdio for Claude Desktop / Claude Code (local store, no auth)."""
+    import sys
+
+    from dip.config import Environment
+    from dip.mcp_server.server import build_server
+    from dip.observability.logging import configure_logging
+    from dip.service.backends import build_services
+
+    settings = get_settings().model_copy(update={"backend": "local", "service_dir": store})
+    # stdout carries the protocol: every log line must go to stderr.
+    configure_logging(
+        settings.log_level, json=settings.env is not Environment.LOCAL, stream=sys.stderr
+    )
+    if granularity not in ("coarse", "fine"):
+        raise typer.BadParameter("granularity must be coarse or fine")
+    server = build_server(build_services(settings), descriptions, granularity)
+    server.run("stdio")
+
+
+principals_app = typer.Typer(help="Who may use the remote MCP server (SPEC §12.2.5).")
+app.add_typer(principals_app, name="principals")
+
+
+def _principal_store() -> "FirestorePrincipalStore":
+    from dip.mcp_server.auth import FirestorePrincipalStore
+
+    return FirestorePrincipalStore()
+
+
+@principals_app.command("add")
+def principals_add(
+    email: str,
+    roles: Annotated[str, typer.Option(help="Comma-separated.")] = "records:read",
+    daily_cap_usd: Annotated[float, typer.Option(help="Daily extraction spend cap.")] = 1.0,
+) -> None:
+    """Invite a Google account. Its stable id (sub) is bound on first sign-in."""
+    from dip.mcp_server.auth import ROLES, Principal
+
+    wanted = [r.strip() for r in roles.split(",") if r.strip()]
+    unknown = sorted(set(wanted) - set(ROLES))
+    if unknown:
+        raise typer.BadParameter(f"unknown role(s) {unknown}; choose from {list(ROLES)}")
+    store = _principal_store()
+    existing = store.get(email)
+    principal = Principal(
+        email=email.lower(),
+        sub=existing.sub if existing else None,
+        roles=wanted,  # type: ignore[arg-type]
+        daily_cap_usd=daily_cap_usd,
+    )
+    store.put(principal)
+    typer.echo(f"{principal.email}: {', '.join(principal.roles)}, ${daily_cap_usd:.2f}/day")
+
+
+@principals_app.command("list")
+def principals_list() -> None:
+    """Every principal, with roles, cap and whether it has signed in."""
+    for p in _principal_store().all():
+        state = "disabled" if p.disabled else ("signed in" if p.sub else "invited")
+        typer.echo(f"{p.email:32s} {','.join(p.roles):45s} ${p.daily_cap_usd:<6.2f} {state}")
+
+
+@principals_app.command("disable")
+def principals_disable(email: str) -> None:
+    """Revoke access at once (cached tokens expire within 5 minutes)."""
+    store = _principal_store()
+    principal = store.get(email)
+    if principal is None:
+        raise typer.BadParameter(f"no principal {email}")
+    store.put(principal.model_copy(update={"disabled": True}))
+    typer.echo(f"{email}: disabled")
+
+
+agent_app = typer.Typer(help="Agent task eval over the MCP tools (SPEC §12.2.6, decision D8).")
+app.add_typer(agent_app, name="agent-eval")
+AGENT_DIR = Path("data/agent_eval")
+STORES = Path("data/mcp-store")
+
+
+@agent_app.command("prepare")
+def agent_prepare() -> None:
+    """Build the normal and oracle stores (dev set) and the task set. Free."""
+    from dip.agent_eval.stores import build
+    from dip.agent_eval.tasks import build_tasks, save
+
+    data = get_settings().data_dir
+    ids = build(data, STORES)
+    tasks = build_tasks(data, ids)
+    save(tasks, AGENT_DIR / "tasks.jsonl")
+    typer.echo(f"{len(ids)} records per store in {STORES}; {len(tasks)} tasks")
+
+
+@agent_app.command("run")
+def agent_run(
+    store: Annotated[str, typer.Option(help="normal | oracle")] = "normal",
+    descriptions: Annotated[str, typer.Option(help="v1 | v2")] = "v2",
+    granularity: Annotated[str, typer.Option(help="coarse | fine")] = "coarse",
+    repeats: Annotated[int, typer.Option(help="Runs per task.")] = 3,
+    model: Annotated[str, typer.Option(help="Agent model.")] = "gpt-5.6-luna",
+    limit: Annotated[int, typer.Option(help="First N tasks only (pilots).")] = 0,
+    max_cost_usd: Annotated[float, typer.Option(help="Refuse if the estimate exceeds this.")] = 1.0,
+) -> None:
+    """Run the agent over the task set against one store and tool variant."""
+    import datetime as dt
+    import json
+    import logging
+
+    import anyio
+
+    from dip.agent_eval.agent import run_all
+    from dip.agent_eval.report import summarize
+    from dip.agent_eval.tasks import load, scorer
+    from dip.eval.runs import spent_usd
+    from dip.mcp_server.server import build_server, load_descriptions
+    from dip.service.backends import build_services
+
+    for noisy in ("httpx", "mcp"):  # one line per HTTP call / MCP request otherwise
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    from dip.observability.logging import configure_logging
+
+    settings = get_settings()
+    configure_logging("WARNING", json=False)
+    tasks = load(AGENT_DIR / "tasks.jsonl")[: limit or None]
+    estimate = 0.0015 * len(tasks) * repeats  # pilot: $0.0007/task (luna), doubled
+    left = settings.budget_usd - spent_usd(_paths()["runs"])
+    typer.echo(f"{len(tasks)} tasks x {repeats}: estimate ${estimate:.2f}; ${left:.2f} budget left")
+    if estimate > min(max_cost_usd, left):
+        typer.echo("over the cap; lower --repeats/--limit or raise --max-cost-usd", err=True)
+        raise typer.Exit(1)
+
+    svc = build_services(
+        settings.model_copy(update={"backend": "local", "service_dir": STORES / store})
+    )
+    server = build_server(svc, descriptions, granularity)  # type: ignore[arg-type]
+    instructions = load_descriptions(descriptions)["instructions"]
+    name = f"{dt.datetime.now(dt.UTC):%Y%m%d-%H%M%S}-agent-{store}-{descriptions}-{granularity}-dev"
+    run_dir = _paths()["runs"] / name
+    key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+    runs = anyio.run(
+        lambda: run_all(tasks, server, instructions, model, run_dir, repeats, api_key=key)
+    )
+    ids = json.loads((STORES / "record_ids.json").read_text())
+    summary = summarize(tasks, runs, scorer(settings.data_dir, ids))
+    config = {"store": store, "descriptions": descriptions, "granularity": granularity,
+              "model": model, "repeats": repeats, "tasks": len(tasks)}  # fmt: skip
+    (run_dir / "summary.json").write_text(json.dumps({"config": config, **summary}, indent=2))
+    per_task = summary.pop("per_task")
+    typer.echo(json.dumps(summary, indent=2))
+    typer.echo("failing: " + ", ".join(t for t, v in per_task.items() if v < 1) or "none")
+    typer.echo(f"-> {run_dir}")
 
 
 if __name__ == "__main__":

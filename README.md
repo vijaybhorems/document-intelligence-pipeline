@@ -5,10 +5,11 @@ Takes messy commercial contracts in on one end and returns clean, validated, evi
 - **Spec:** [docs/SPEC.md](docs/SPEC.md)
 - **Decisions:** [docs/adr/](docs/adr/)
 - **Phase notes:** [docs/notes/](docs/notes/)
+- **Design guide** (every decision, and how to defend it): [docs/design-guide.md](docs/design-guide.md)
 
 ## Status
 
-Phase 9 (analytics & hardening) complete. The service runs on Google Cloud Run (dev), built with Terraform and deployed from GitHub Actions without stored keys. Records are compacted hourly into a Parquet lake that DuckDB queries straight from GCS, behind whitelisted `/v1/analytics` queries. Load-tested with 50 contracts: p95 63 s end to end for a ~20-page contract, 160 ms for status calls, $0.0061 median per contract, 50/50 succeeded ([numbers](docs/SPEC.md#121-non-functional-targets-measured)). The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
+Phase 9.5 (MCP interface) complete: agents can search and cite the contracts through an MCP server, locally (Claude Desktop, stdio) or on Cloud Run with Google OAuth. With gold records, the same agent answers 93% of the task set; with ours, 64%. The gap is extraction, not tool design ([ADR D8](docs/adr/D8-mcp-tool-design.md)). The service runs on Google Cloud Run (dev), built with Terraform and deployed from GitHub Actions without stored keys. Records are compacted hourly into a Parquet lake that DuckDB queries straight from GCS, behind whitelisted `/v1/analytics` queries. Load-tested with 50 contracts: p95 63 s end to end for a ~20-page contract, 160 ms for status calls, $0.0061 median per contract, 50/50 succeeded ([numbers](docs/SPEC.md#121-non-functional-targets-measured)). The pipeline uses the hybrid route (pypdf text for born-digital PDFs, multimodal for scans) on gpt-5.6-luna. Current best on dev: **82.8 micro F1** at about $0.0075/contract. [Cost vs quality chart](docs/img/d1-d2-pareto.png).
 
 ## Quickstart
 
@@ -143,6 +144,31 @@ uv run dip query eval_by_route_model split=experiment                           
 | `field_regressions` | fields whose F1 dropped between two eval runs |
 
 **Load test:** `make loadtest`, which runs 50 train contracts, costs ~$0.45 and is capped at $1.50.
+
+## Agent access: MCP (Phase 9.5)
+
+The same contracts, as tools an AI agent can call (SPEC §12.2):
+
+| Tool | For |
+|---|---|
+| `search_records` | "which contracts…": every filter in one call, with a quote per matched clause |
+| `get_record` | one contract, projected to the fields you ask for, each with evidence |
+| `run_analytics` | the analytics queries above |
+| `submit_extraction` / `get_extraction_status` | add a document (https URL or the bucket's `inbox/`) and poll it |
+
+**Locally (Claude Desktop):** add this under `mcpServers` in `claude_desktop_config.json` (needs `uv run dip agent-eval prepare` once, to build the store):
+
+```json
+"dip": {
+  "command": "/path/to/uv",
+  "args": ["--directory", "/path/to/document_intelligence_pipeline",
+           "run", "dip", "mcp-stdio", "--store", "data/mcp-store/normal"]
+}
+```
+
+**Deployed:** `https://dip-mcp-<project-number>.us-central1.run.app/mcp`, with Google OAuth ([ADR I8](docs/adr/I8-mcp-authorization.md)). Setup is `./infra/bootstrap/dip-mcp-oauth.sh`, then `dip principals add <email>`. Connecting MCP Inspector is described in the [runbook](docs/runbook.md#mcp-dip-mcp).
+
+**Measuring tool design:** `uv run dip agent-eval run --store normal|oracle --descriptions v1|v2 --granularity coarse|fine` runs 25 gold-derived tasks through an agent (about $0.05 per variant).
 
 ## Configuration
 

@@ -42,6 +42,8 @@ class Job(BaseModel):
     idempotency_key: str | None = None
     attempts: int = 0
     sweeps: int = 0  # times the sweeper re-sent this job (dip.service.sweeper)
+    principal: str | None = None  # who submitted it (MCP: Google sub), for spend caps
+    reserved_usd: float = 0.0  # spend reserved at submission; settled when the job ends
     record_key: str | None = None
     record_id: str | None = None
     cost_usd: float | None = None

@@ -11,6 +11,7 @@ from dip.service.blobs import BlobStore, GcsBlobStore, LocalBlobStore
 from dip.service.jobs import FirestoreJobStore, JobStore, MemoryJobStore
 from dip.service.processing import process_job
 from dip.service.queue import CloudTasksQueue, HttpQueue, InlineQueue, TaskQueue
+from dip.service.usage import FirestoreUsageStore, MemoryUsageStore, UsageStore
 
 
 @dataclass
@@ -20,10 +21,11 @@ class Services:
     blobs: BlobStore
     pipeline: Pipeline
     lake: Lake
+    usage: UsageStore = field(default_factory=MemoryUsageStore)
     queue: TaskQueue = field(init=False)
 
     def process(self, job_id: str) -> None:
-        process_job(job_id, self.jobs, self.blobs, self.pipeline)
+        process_job(job_id, self.jobs, self.blobs, self.pipeline, self.usage)
 
 
 def default_pipeline(settings: Settings) -> Pipeline:
@@ -82,7 +84,8 @@ def build_services(
     blobs = build_blobs(settings)
     jobs = build_jobs(settings)
     lake = build_lake(settings, blobs)
-    services = Services(settings, jobs, blobs, pipeline or default_pipeline(settings), lake)
+    usage: UsageStore = FirestoreUsageStore() if settings.backend == "gcp" else MemoryUsageStore()
+    services = Services(settings, jobs, blobs, pipeline or default_pipeline(settings), lake, usage)
     services.queue = queue or _queue(settings, services.process)
     return services
 

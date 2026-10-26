@@ -4,7 +4,8 @@ import structlog
 
 from dip.pipeline import Pipeline, Stage
 from dip.service.blobs import BlobStore
-from dip.service.jobs import JobStatus, JobStore
+from dip.service.jobs import Job, JobStatus, JobStore
+from dip.service.usage import UsageStore
 
 log = structlog.get_logger()
 MAX_ATTEMPTS = 3  # then the job is marked failed and the queue stops retrying
@@ -14,7 +15,19 @@ def record_key(record_id: str, created: str) -> str:
     return f"records/dt={created[:10]}/{record_id}.json"
 
 
-def process_job(job_id: str, jobs: JobStore, blobs: BlobStore, pipeline: Pipeline) -> None:
+def _settle(usage: UsageStore | None, job: Job, actual_usd: float) -> None:
+    """Replace the spend reserved at submission with what the job actually cost."""
+    if usage is not None and job.principal and job.reserved_usd:
+        usage.add_spend(job.principal, job.created_at.date(), actual_usd - job.reserved_usd)
+
+
+def process_job(
+    job_id: str,
+    jobs: JobStore,
+    blobs: BlobStore,
+    pipeline: Pipeline,
+    usage: UsageStore | None = None,
+) -> None:
     """Idempotent: a finished job is left alone, so a redelivered task is harmless.
 
     Raises (so the worker answers 5xx and the queue retries) on a failure before the
@@ -50,6 +63,7 @@ def process_job(job_id: str, jobs: JobStore, blobs: BlobStore, pipeline: Pipelin
             seconds=record.provenance.seconds,
             error=None,
         )
+        _settle(usage, job, record.provenance.cost_usd)
         bound.info(
             "job.done",
             status=status.value,
@@ -68,4 +82,5 @@ def process_job(job_id: str, jobs: JobStore, blobs: BlobStore, pipeline: Pipelin
             raise
         bound.exception("job.failed", error=type(exc).__name__, attempts=job.attempts + 1)
         jobs.update(job_id, status=JobStatus.FAILED, error=error)
+        _settle(usage, job, 0.0)  # a failed job costs what its calls cost; none are billed back
         # Returning normally (2xx) tells the queue to stop retrying.

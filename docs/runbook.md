@@ -112,3 +112,41 @@ Alert recipients are in `infra/terraform/private.auto.tfvars` (gitignored).
    - Pause the queue: `gcloud tasks queues pause dip-jobs --location=$R --project=$P`. Uploads still succeed; jobs wait.
    - Then lower `worker_max_instances` or `tasks_max_concurrent` in tfvars and apply.
 3. **Resume:** `gcloud tasks queues resume dip-jobs --location=$R --project=$P`.
+
+## MCP (dip-mcp)
+
+**Give someone access** (they must also be a test user on the OAuth consent screen while it's in Testing mode):
+```bash
+GOOGLE_CLOUD_PROJECT=$P uv run dip principals add someone@example.com \
+  --roles records:read,analytics:read --daily-cap-usd 1
+```
+- **Roles:** `records:read`, `analytics:read`, `extractions:write` (submitting costs money).
+- **Binding:** their Google `sub` is bound on first sign-in.
+
+**Revoke access:** `GOOGLE_CLOUD_PROJECT=$P uv run dip principals disable someone@example.com`. Takes effect within 5 minutes (the token cache).
+
+**Connect MCP Inspector:**
+```bash
+npx -p @modelcontextprotocol/inspector@2.10.1 mcp-inspector
+```
+Add a server:
+- **Transport:** Streamable HTTP
+- **URL:** `<mcp_url>/mcp` (`terraform output mcp_url`)
+- **Protocol era:** Legacy
+- **OAuth settings:** the client ID and secret from the wizard, scopes `openid email`, and **"Request refresh token" unticked** (Google rejects `offline_access`).
+
+**Troubleshooting:**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Google: `redirect_uri_mismatch` | Inspector's redirect URI (shown in its OAuth settings) isn't registered | add it to the OAuth client (Auth Platform → Clients); `localhost` and `127.0.0.1` are different URIs |
+| Google: `invalid_scope` | "Request refresh token" asks for `offline_access` | untick it |
+| Connection times out at ~30 s | cold start of `dip-mcp` | retry, or raise Inspector's timeout; the startup budget is 120 s |
+| 403 `token is not…` / tool error naming a role | not a principal, disabled, or missing the role | `dip principals list`, then add or fix it |
+| 503 `temporarily_unavailable` | Google's tokeninfo unreachable: the server fails closed | retry; check Google's status |
+| `search_records` crashes after a lake schema change | partitions written by older code | `gcloud run jobs execute dip-compactor --args=compact,--force …` (`LAKE_VERSION` normally triggers this) |
+
+**Audit:** every tool call logs `mcp.tool_call` with principal, tool, argument hash, outcome (`ok`, `tool_error`, `crash`) and latency:
+```bash
+gcloud logging read 'jsonPayload.message="mcp.tool_call"' --project=$P --limit=20
+```

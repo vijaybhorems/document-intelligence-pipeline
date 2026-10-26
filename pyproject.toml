@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28.1",
     "llama-index-core>=0.14.25",
     "llama-index-embeddings-openai>=0.7.0",
+    "mcp>=2.3.0,<3",
     "numpy>=2.5.4",
     "openai>=3.35.1",
     "openinference-instrumentation-openai>=0.1.65",
@@ -27,6 +28,7 @@ dependencies = [
     "pypdfium2>=5.14.0",
     "python-dotenv>=1.1",
     "python-multipart>=0.0.32",
+    "pyyaml>=6.0",
     "rapidfuzz>=3.14.6",
     "structlog>=26.1.0",
     "tiktoken>=0.14.0",
@@ -82,6 +84,7 @@ select = [
   "S101",  # assert is how pytest works
   "S311",  # seeded random.Random is fine for sampling tests
   "S608",  # SQL over tmp_path files, no user input
+  "S105", "S106",  # fake tokens in auth tests are not secrets
 ]
 
 # ---------------------------------------------------------------- pyright

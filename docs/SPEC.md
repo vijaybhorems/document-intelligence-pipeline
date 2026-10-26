@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.13 |
+| **Status** | Draft v0.14 |
 | **Owner** | Vijay |
 | **Last updated** | 2026-10-21 |
 | **Target platform** | Google Cloud (Cloud Run) |
@@ -128,7 +128,7 @@ Every significant design decision is an **experiment** with a hypothesis, fixed 
 | D5 | **Prompt strategy** | zero-shot definitions · + phrasing variants · + few-shot from train · + defined-terms injection | §7.2–7.3, ablation one step at a time | F1 overall + **non-canonical phrasing recall** (§10.6) | 5 · **decided: v4, all four** ([ADR](adr/D5-prompt-strategy.md)) |
 | D6 | **Where validation goes** | strict schema only · schema + post-hoc validators · post-hoc + re-ask with validation errors | §8.4 | valid-output rate, hallucination rate, precision, extra cost | 4 · **decided: post-hoc + re-ask** ([ADR](adr/D6-validation-placement.md)) |
 | D7 | **Grounding policy** | keep ungrounded values with a warning · drop them | §8.3 | precision vs recall trade-off per type | 4 · **decided: warn** ([ADR](adr/D7-grounding-policy.md)) |
-| D8 | **MCP tool design** | few coarse tools · many fine-grained tools; terse vs detailed tool descriptions | §12.2.6 agent task eval | answer accuracy, citation accuracy, tool calls per task, tokens per task | 9.5 |
+| D8 | **MCP tool design** | few coarse tools · many fine-grained tools; terse vs detailed tool descriptions | §12.2.6 agent task eval | answer accuracy, citation accuracy, tool calls per task, tokens per task | 9.5 · **decided: coarse tools + v2 descriptions** ([ADR](adr/D8-mcp-tool-design.md)) |
 
 ### 3.2 Experiment protocol
 
@@ -662,12 +662,18 @@ The REST API (FastAPI) is the primary interface. The MCP server (§12.2) is a se
 
 **Design rules:**
 
-- **Structured results.** Every tool declares an `outputSchema` generated from Pydantic and returns `structuredContent`, plus a one-line text summary. Tool inputs are generated from the same models, so there's one source of truth with REST.
+- **Structured results.** Every tool declares an `outputSchema` generated from Pydantic and returns `structuredContent`. Its text content is a one-line summary *followed by the same data as compact JSON*: the MCP spec asks for the JSON in text too, for clients that pass only `content` to the model (Phase 9.5; a summary alone would leave those clients with nothing). Tool inputs are generated from the same models, so there's one source of truth with REST.
 - **Descriptions are prompts.** Tool descriptions are written for the model. They say when to use the tool, what it returns, that extraction is asynchronous and takes minutes, and how often to poll. They're versioned (`mcp/descriptions/v{N}.yaml`) and measured by D8.
 - **Small responses.** Use projection, pagination, row caps, and a maximum quote length of 1,000 characters. Agents pay for every token you return.
 - **Every returned value includes its evidence** (`quote`, `page`) so agents can cite it.
 - **Actionable errors.** Errors come back as tool results with `isError` and an instruction for the agent, e.g. "Job still extracting; call get_extraction_status again in ~30s". Protocol-level errors are reserved for malformed requests.
 - **No destructive tools.** Nothing deletes, overwrites, or re-processes records. Re-processing stays an operator action via the CLI or REST.
+
+**Status (Phase 9.5):** built as specified, in `src/dip/mcp_server/` on the Python MCP SDK 2.3 (`MCPServer`, the renamed FastMCP).
+- **Tools and resources:** the 5 tools and 3 resources above, plus a fine-grained tool variant kept for D8 re-measurement.
+- **Transports:** stdio (`dip mcp-stdio`, Claude Desktop), and stateless Streamable HTTP on Cloud Run (`dip-mcp`).
+- **Behaviour as specified:** quotes are capped at 1,000 characters, records are projected, analytics rows are capped at 100, and errors come back as `isError` results with the next step to take.
+- **Both interfaces share one service layer** (`dip.service.extractions`), so REST and MCP can't diverge.
 
 #### 12.2.4 Long-running jobs
 
@@ -718,7 +724,7 @@ Google signs users in, and `dip-mcp` is an OAuth 2.1 **resource server** under t
 **Google project setup:**
 - **Consent screen:** if you're on Google Workspace, use the *Internal* audience (only your domain can sign in). Otherwise use *External* in **Testing** mode with an explicit test-user list. Test users are a second allowlist layer on top of `principals`.
 - **Manual step:** the OAuth consent screen and the general-purpose OAuth client can't be fully managed by Terraform. Create them in the console and record the steps in `docs/runbook.md`.
-- **Secrets:** store the client ID and secret in Secret Manager (`mcp-oauth-client-id`, `mcp-oauth-client-secret`).
+- **Secrets:** ~~store the client ID and secret in Secret Manager~~ **Phase 9.5:** the server needs only the client *ID*, which is public by design (a Terraform variable in gitignored `private.auto.tfvars`). The secret belongs to MCP clients and isn't stored server-side at all ([ADR I8](adr/I8-mcp-authorization.md)).
 - **Onboarding:** add principals with `dip principals add <email> --roles records:read,analytics:read --daily-cap-usd 5`. The command resolves and stores the `sub` on first sign-in.
 
 **Fallback if a target MCP client requires Dynamic Client Registration:** put an OAuth proxy in front of Google, either FastMCP's Google provider or an equivalent. The proxy handles registration and the resource parameter, uses Google for login, and issues its own short-lived, audience-bound tokens. The cost is that you now operate token issuance: signing keys go in Secret Manager, client registrations go in Firestore, and every token must be short-lived. Only adopt the proxy if a required client can't use a pre-registered client ID. Record the outcome in ADR I8.
@@ -738,6 +744,13 @@ This applies "decisions through evals" to the agent layer.
   - Tool calls per task, tokens per task, and tool-use failures (wrong tool, invalid arguments, polling loops).
 - **Oracle run:** run the same tasks against **gold** records loaded into the store. Comparing it with the normal run separates *extraction errors* (the record was wrong) from *agent/tool-design errors* (the record was right and the answer was wrong).
 - **Variants:** tool description v1 vs v2, and coarse vs fine-grained tools. Write the results up as the D8 ADR.
+- **Results (Phase 9.5, [ADR D8](adr/D8-mcp-tool-design.md)):**
+  - **Run:** 25 generated tasks × 3 runs × 8 variants, $0.43 in total.
+  - **Records dominate:** with gold records the agent answers **93%**; with ours **64%**, a +29-point gap [13, 47]. 7 of the 9 failing tasks are extraction errors.
+  - **Descriptions:** v2 raised citation accuracy by **8 points** [3, 15], with no change in answer accuracy.
+  - **Granularity:** fine-grained tools cost 25–42% more and added nothing.
+  - **The eval also found its own defects:** a task with wrong gold, and a real agent error (joining separate quotes into one).
+  - **Not done:** the LLM judge for free-text answers. Every task is exact-match or quote-checked, so none was needed.
 
 #### 12.2.7 Cost and abuse controls
 
@@ -770,10 +783,11 @@ This applies "decisions through evals" to the agent layer.
   - **On merge:** build, push, deploy both services by digest (worker first), and post-deploy smoke test. **Not** `terraform apply`: infrastructure is applied by a person (ADR I10).
   - **Prod:** manual approval, then promote the same image digest.
 - **Runbook ([`docs/runbook.md`](runbook.md)):** first deploy, replay a failed job, re-extract everything with a new prompt version, roll back a Cloud Run revision, rotate keys, and respond to a budget alert.
-- **Status (Phase 9):** dev is live (`infra/terraform`, `envs/dev.tfvars`).
+- **Status (Phase 9.5):** dev is live (`infra/terraform`, `envs/dev.tfvars`).
+  - Cloud Run services `dip-api`, `dip-worker` and `dip-mcp` (Google OAuth, `sa-mcp`).
   - Cloud Run Jobs `dip-compactor` (hourly) and `dip-sweeper` (every 10 min) run on Cloud Scheduler, each with its own service account.
   - `dip-eval` as a Cloud Run Job is not built: eval runs need the local CUAD data and are published with `dip lake-push-evals`.
-  - Prod has a project and a budget, but no deployment yet; `dip-mcp` comes in 9.5.
+  - Prod has a project and a budget, but no deployment yet.
 
 ---
 
@@ -940,6 +954,15 @@ document_intelligence_pipeline/
 ---
 
 ## Changelog
+
+- **v0.14 (2026-10-21), Phase 9.5:**
+  - MCP server built: shared service layer, Google OAuth resource server, SSRF guard, spend caps, injection fixtures.
+  - D8 decided: coarse tools + v2 descriptions.
+  - New ADR I8 file, verified end to end with MCP Inspector against Cloud Run.
+  - §13: every service's startup budget is 120 s (cold starts measured up to 29 s).
+  - New: `docs/design-guide.md`, every decision explained for defence.
+  - §12.2.3: text content carries the JSON (MCP spec compatibility).
+  - §12.2.5: client secret not stored server-side.
 
 - **v0.13 (2026-10-21), Phase 9:**
   - §9: lake as built: compaction, layout, the 5 named queries, contract-type derivation (95.1%).
