@@ -195,3 +195,20 @@ def test_analytics_endpoint(services: Services, lake: Lake) -> None:
     assert bad.status_code == 422
     assert bad.headers["content-type"] == "application/problem+json"
     assert client.get("/v1/analytics/nope").status_code == 404
+
+
+def test_a_layout_change_rebuilds_every_partition(
+    services: Services, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dip.analytics import lake
+
+    blobs = services.blobs
+    assert isinstance(blobs, LocalBlobStore)
+    for record in _records(services, 2):
+        _store(blobs, record)
+    compact(blobs)
+    assert compact(blobs).partitions_rebuilt == []  # current: nothing to do
+
+    monkeypatch.setattr(lake, "LAKE_VERSION", "99")  # the code's columns changed
+    assert compact(blobs).partitions_rebuilt == ["2026-10-21"]
+    assert compact(blobs).partitions_rebuilt == []  # and recorded

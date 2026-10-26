@@ -1,0 +1,15 @@
+# Tool descriptions v1: terse, the way most MCP servers ship. Baseline for D8.
+version: v1
+instructions: Contract records extracted from PDFs.
+tools:
+  submit_extraction: Extract a contract from a URL or GCS URI.
+  get_extraction_status: Status of an extraction job.
+  get_record: Get a contract record.
+  search_records: Search contract records.
+  run_analytics: Run an analytics query.
+  get_contract_overview: Overview of one contract.
+  get_field: One field of one contract.
+  find_contracts_with_clause: Contracts with (or without) a clause.
+  find_contracts_by_governing_law: Contracts governed by a jurisdiction's law.
+  find_contracts_by_type: Contracts of a type.
+  find_contracts_expiring: Contracts by expiration date.

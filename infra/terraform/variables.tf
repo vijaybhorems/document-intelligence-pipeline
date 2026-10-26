@@ -68,6 +68,17 @@ variable "tasks_max_per_second" {
   default = 1
 }
 
+variable "mcp_oauth_client_id" {
+  type        = string
+  description = "Google OAuth client ID that MCP tokens must be issued to. Empty: no dip-mcp yet."
+  default     = ""
+}
+
+variable "mcp_max_instances" {
+  type    = number
+  default = 2
+}
+
 variable "alert_emails" {
   type        = list(string)
   description = "Who gets alert emails. Set in a gitignored *.auto.tfvars, not in the public repo."

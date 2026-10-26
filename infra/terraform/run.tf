@@ -5,6 +5,11 @@
 #               the app verifies the same OIDC token again (dip.service.auth)
 
 locals {
+  # Startup budget: tries x 2 s = 120 s. Cold starts of this 825 MB image measured 10-29 s
+  # (Phases 8-9.5); 30 s failed a dip-mcp rollout at 29 s. Requests wait for a slow start
+  # instead of failing it.
+  startup_probe_failures = 60
+
   # Deterministic URL: known before the service exists, so the API can name the worker
   # and the worker can check that tokens were minted for it (the OIDC audience).
   worker_url = "https://dip-worker-${data.google_project.this.number}.${var.region}.run.app"
@@ -72,7 +77,7 @@ resource "google_cloud_run_v2_service" "api" {
           path = "/health"
         }
         period_seconds    = 2
-        failure_threshold = 15
+        failure_threshold = local.startup_probe_failures
       }
     }
   }
@@ -145,7 +150,7 @@ resource "google_cloud_run_v2_service" "worker" {
           path = "/health"
         }
         period_seconds    = 2
-        failure_threshold = 15
+        failure_threshold = local.startup_probe_failures
       }
     }
   }

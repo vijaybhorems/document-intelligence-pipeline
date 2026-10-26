@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     internal_token: SecretStr | None = None  # local shared secret for /internal/*
     duckdb_extension_dir: str | None = None  # baked into the image (httpfs); None: DuckDB's default
     max_queued_jobs: int = 200  # backpressure: above this, uploads get 429 (0 = no limit)
+    mcp_submissions_per_minute: int = 10  # per principal (SPEC §12.2.7)
+    mcp_oauth_client_id: str | None = None  # Google OAuth client: tokens must be issued to it
+    mcp_public_url: str | None = None  # this server's URL, for OAuth protected-resource metadata
+    mcp_extra_urls: tuple[str, ...] = ()  # other URLs it answers on (Cloud Run has two)
+    mcp_allowed_origins: tuple[str, ...] = (  # MCP Inspector, under either loopback name
+        "http://localhost:6274",
+        "http://127.0.0.1:6274",
+    )
+    mcp_descriptions: str = "v2"  # tool descriptions version (decision D8)
     max_upload_mb: int = 25
     max_pages: int = 300
     wait_max_seconds: float = 60.0

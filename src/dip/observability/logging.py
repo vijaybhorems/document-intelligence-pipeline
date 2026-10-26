@@ -6,6 +6,7 @@ Never log document text or keys.
 
 import logging
 import sys
+from typing import TextIO
 
 import structlog
 
@@ -16,7 +17,7 @@ def _cloud_logging_fields(_: object, method: str, event: dict[str, object]) -> d
     return event
 
 
-def configure_logging(level: str = "INFO", json: bool = True) -> None:
+def configure_logging(level: str = "INFO", json: bool = True, stream: TextIO | None = None) -> None:
     processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
@@ -30,6 +31,8 @@ def configure_logging(level: str = "INFO", json: bool = True) -> None:
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(level)),
-        logger_factory=structlog.PrintLoggerFactory(sys.stdout),
+        # stdout by default (Cloud Run reads it); stderr for the MCP stdio transport, whose
+        # stdout is the protocol channel.
+        logger_factory=structlog.PrintLoggerFactory(stream or sys.stdout),
         cache_logger_on_first_use=True,
     )
