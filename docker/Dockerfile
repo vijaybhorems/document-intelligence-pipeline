@@ -10,7 +10,7 @@
 FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
 
 # ---------------------------------------------------------------- build
-FROM python:3.13.15-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS build
+FROM python:3.15.0-slim-trixie@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS build
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -39,7 +39,7 @@ RUN /app/.venv/bin/python -c "from dip.extract.prompts import _field_notes; asse
 RUN /app/.venv/bin/python -c "import duckdb; duckdb.connect(config={'extension_directory': '/app/duckdb_extensions'}).install_extension('httpfs')"
 
 # ---------------------------------------------------------------- runtime
-FROM python:3.13.15-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS runtime
+FROM python:3.15.0-slim-trixie@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS runtime
 # Not "dip": Debian already has a group of that name (dial-up IP).
 RUN groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
